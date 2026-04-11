@@ -1,0 +1,12 @@
+# Python
+__pycache__/
+.pytest_cache/
+.venv/
+venv/
+
+# Backend data and config
+backend/data/
+backend/config.json
+
+# Node
+node_modules/

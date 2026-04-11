@@ -1,0 +1,267 @@
+<template>
+  <div class="px-4 md:px-12 py-6 md:py-8 max-w-5xl mx-auto space-y-6 md:space-y-10">
+    <div class="space-y-2">
+      <h1 class="text-2xl md:text-4xl font-black text-on-surface tracking-tight">系统设置</h1>
+      <div class="flex items-center gap-3 md:gap-4">
+        <div class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-widest">v2.4.0-Stable</div>
+      </div>
+    </div>
+
+    <div v-if="error" class="bg-error/10 border border-error/20 rounded-xl p-4 flex items-start gap-3">
+      <span class="material-symbols-outlined text-error">error</span>
+      <div>
+        <p class="font-bold text-error">配置错误</p>
+        <p class="text-sm text-error/80">{{ error }}</p>
+      </div>
+    </div>
+
+    <!-- 大语言模型引擎供应商 -->
+    <section class="space-y-4 md:space-y-6">
+      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">
+        大语言模型引擎
+        <span class="text-primary">供应商</span>
+      </h2>
+      
+      <div class="space-y-3 md:space-y-4">
+        <!-- OpenAI -->
+        <div 
+          @click="selectProvider('openai')"
+          class="p-4 md:p-8 rounded-xl md:rounded-2xl cursor-pointer transition-all border-2"
+          :class="cfg.provider === 'openai' 
+            ? 'border-primary bg-primary/5 shadow-lg' 
+            : 'border-outline-variant/20 bg-surface hover:border-outline-variant hover:bg-surface-container'"
+        >
+          <div class="flex items-start justify-between">
+            <div class="space-y-3 md:space-y-4">
+              <div class="w-12 h-12 md:w-16 md:h-16 bg-surface-container rounded-lg flex items-center justify-center">
+                <span class="material-symbols-outlined text-3xl md:text-4xl" :class="cfg.provider === 'openai' ? 'text-primary' : 'text-outline'">hub</span>
+              </div>
+              <div>
+                <h3 class="text-xl md:text-2xl font-black text-on-surface">OpenAI 云端</h3>
+                <p class="text-sm md:text-lg text-on-surface-variant mt-2">Enterprise-grade performance. Required for complex reasoning and large-scale analysis.</p>
+              </div>
+            </div>
+            <div class="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center"
+              :class="cfg.provider === 'openai' ? 'border-primary bg-primary' : 'border-outline'">
+              <div v-if="cfg.provider === 'openai'" class="w-2 h-2 md:w-3 md:h-3 bg-white rounded-full"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Ollama -->
+        <div 
+          @click="selectProvider('ollama')"
+          class="p-4 md:p-8 rounded-xl md:rounded-2xl cursor-pointer transition-all border-2"
+          :class="cfg.provider === 'ollama' 
+            ? 'border-primary bg-primary/5 shadow-lg' 
+            : 'border-outline-variant/20 bg-surface hover:border-outline-variant hover:bg-surface-container'"
+        >
+          <div class="flex items-start justify-between">
+            <div class="space-y-3 md:space-y-4">
+              <div class="w-12 h-12 md:w-16 md:h-16 bg-surface-container rounded-lg flex items-center justify-center">
+                <span class="material-symbols-outlined text-3xl md:text-4xl" :class="cfg.provider === 'ollama' ? 'text-primary' : 'text-outline'">memory</span>
+              </div>
+              <div>
+                <h3 class="text-xl md:text-2xl font-black text-on-surface">Ollama 本地</h3>
+                <p class="text-sm md:text-lg text-on-surface-variant mt-2">On-premise execution. Ideal for sensitive data compliance and air-gapped environments.</p>
+              </div>
+            </div>
+            <div class="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center"
+              :class="cfg.provider === 'ollama' ? 'border-primary bg-primary' : 'border-outline'">
+              <div v-if="cfg.provider === 'ollama'" class="w-2 h-2 md:w-3 md:h-3 bg-white rounded-full"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- API凭证 -->
+    <section class="space-y-4 md:space-y-6">
+      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">API 凭证</h2>
+      
+      <div class="space-y-4 md:space-y-6">
+        <!-- OpenAI API密钥 -->
+        <div v-if="cfg.provider === 'openai'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">OpenAI API 密钥</label>
+          <div class="relative">
+            <input 
+              :type="showPassword ? 'text' : 'password'"
+              v-model="cfg.openai_api_key"
+              @input="handleApiKeyChange"
+              placeholder="sk-..."
+              class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 pr-12"
+            />
+            <button 
+              @click="showPassword = !showPassword"
+              class="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-surface-container rounded-lg transition-colors"
+            >
+              <span class="material-symbols-outlined text-outline">
+                {{ showPassword ? 'visibility_off' : 'visibility' }}
+              </span>
+            </button>
+          </div>
+        </div>
+
+        <!-- API基础URL -->
+        <div v-if="cfg.provider === 'openai'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">OpenAI API 基础URL</label>
+          <input 
+            v-model="cfg.openai_base_url"
+            @input="handleBaseUrlChange"
+            placeholder="https://api.openai-hk.com/v1"
+            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
+          />
+        </div>
+
+        <!-- 模型选择 -->
+        <div v-if="cfg.provider === 'openai'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">聊天模型</label>
+          <select 
+            v-model="cfg.openai_chat_model"
+            @change="handleModelChange"
+            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
+          >
+            <option value="gpt-3.5-turbo">GPT-3.5 Turbo</option>
+            <option value="gpt-4">GPT-4</option>
+            <option value="gpt-4-turbo">GPT-4 Turbo</option>
+            <option value="gpt-4o">GPT-4o</option>
+            <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <option value="gpt-5">GPT-5</option>
+          </select>
+        </div>
+
+        <!-- Ollama URL -->
+        <div v-if="cfg.provider === 'ollama'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">Ollama URL</label>
+          <input 
+            v-model="cfg.ollama_url"
+            @input="handleOllamaUrlChange"
+            placeholder="http://localhost:11434"
+            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
+          />
+        </div>
+
+        <!-- Ollama 模型 -->
+        <div v-if="cfg.provider === 'ollama'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">Ollama 模型</label>
+          <input 
+            v-model="cfg.ollama_model"
+            @input="handleOllamaModelChange"
+            placeholder="llama2"
+            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
+          />
+        </div>
+      </div>
+    </section>
+
+    <!-- 保存按钮 -->
+    <div class="pt-6 md:pt-8">
+      <button 
+        @click="save"
+        :disabled="saving || loading"
+        class="w-full py-3 md:py-4 bg-primary text-on-primary rounded-xl font-black text-base md:text-lg shadow-lg shadow-primary/20 hover:bg-primary/90 active:scale-[0.99] transition-all disabled:opacity-50 flex items-center justify-center gap-2 md:gap-3"
+      >
+        <span v-if="saving" class="material-symbols-outlined animate-spin text-base md:text-xl">progress_activity</span>
+        {{ saving ? '保存中...' : loading ? '加载中...' : '应用更改' }}
+      </button>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref, computed, onMounted } from 'vue'
+import api from '../services/api'
+
+const loading = ref(true)
+const saving = ref(false)
+const showPassword = ref(false)
+const error = ref('')
+
+const cfg = ref({
+  provider: 'openai',
+  openai_api_key: '',
+  openai_base_url: 'https://api.openai-hk.com/v1',
+  openai_chat_model: 'gpt-3.5-turbo',
+  ollama_url: 'http://localhost:11434',
+  ollama_model: 'llama2'
+})
+
+const validate = () => {
+  if (cfg.value.provider === 'openai' && !cfg.value.openai_api_key?.trim()) {
+    error.value = '请输入 OpenAI API 密钥'
+    return false
+  }
+  if (cfg.value.provider === 'ollama') {
+    if (!cfg.value.ollama_url?.trim()) {
+      error.value = '请输入 Ollama URL'
+      return false
+    }
+    if (!cfg.value.ollama_model?.trim()) {
+      error.value = '请输入 Ollama 模型名称'
+      return false
+    }
+  }
+  error.value = ''
+  return true
+}
+
+const load = async () => {
+  loading.value = true
+  error.value = ''
+  try {
+    const res = await api.get('/config')
+    if (res.data) {
+      cfg.value = { ...cfg.value, ...res.data }
+    }
+  } catch (e) {
+    console.error('Failed to load config:', e)
+  } finally {
+    loading.value = false
+  }
+}
+
+const save = async () => {
+  if (!validate()) return
+  saving.value = true
+  try {
+    await api.post('/config', cfg.value)
+    error.value = ''
+    alert('配置保存成功！')
+  } catch (e) {
+    console.error('Failed to save config:', e)
+    const errorMsg = e.response?.data?.detail || e.message || '保存失败'
+    error.value = `保存失败: ${errorMsg}`
+  } finally {
+    saving.value = false
+  }
+}
+
+// 处理函数
+const selectProvider = (provider) => {
+  cfg.value.provider = provider
+}
+
+const handleApiKeyChange = () => {
+  // 自动保存
+}
+
+const handleBaseUrlChange = () => {
+  // 自动保存
+}
+
+const handleModelChange = () => {
+  // 自动保存
+}
+
+const handleOllamaUrlChange = () => {
+  // 自动保存
+}
+
+const handleOllamaModelChange = () => {
+  // 自动保存
+}
+
+onMounted(() => {
+  load()
+})
+</script>

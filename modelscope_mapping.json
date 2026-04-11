@@ -1,0 +1,8 @@
+{
+  "LAYOUT_MODEL_CHECKPOINT": "damo/layout-analysis",
+  "RECOGNITION_MODEL_CHECKPOINT": "damo/cv_ocr-recognition-general_damo",
+  "FOUNDATION_MODEL_CHECKPOINT": "damo/nlp_document-structured-layout",
+  "TABLE_REC_MODEL_CHECKPOINT": "damo/cv_table-recognition",
+  "OCR_ERROR_MODEL_CHECKPOINT": "damo/nlp_ocr-correction",
+  "DETECTOR_MODEL_CHECKPOINT": "damo/cv_object-detection"
+}
