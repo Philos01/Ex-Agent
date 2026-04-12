@@ -69,7 +69,16 @@ DEFAULT_CONFIG: Dict = {
     "max_history": 10,
     "upload_max_size": 104857600,
     "allow_user_registration": False,
-    "allow_pdf_conversion": False
+    "allow_pdf_conversion": False,
+    "hybrid_search": {
+        "enabled": True,
+        "initial_retrieve_count": 20,
+        "final_select_count": 3,
+        "bm25_weight": 0.5,
+        "embedding_weight": 0.5,
+        "rerank_model": "BAAI/bge-reranker-v2-m3",
+        "enable_query_rewrite": True
+    }
 }
 
 

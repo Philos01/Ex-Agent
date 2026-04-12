@@ -2,6 +2,7 @@
 Question-answer logic: retrieve and call LLM
 """
 from app.services.vector_store import search
+from app.services.hybrid_search import hybrid_search
 from app.core.config import load_config
 from openai import OpenAI
 import requests
@@ -131,7 +132,12 @@ def _get_openai_client(cfg):
 
 def answer_question(question: str, provider: str = "openai", top_k: int = 5) -> Tuple[str, List[dict]]:
     cfg = load_config()
-    docs = search(question, top_k=top_k, provider=provider)
+    # 检查是否启用混合检索
+    hybrid_config = cfg.get("hybrid_search", {})
+    if hybrid_config.get("enabled", True):
+        docs = hybrid_search(question, provider=provider)
+    else:
+        docs = search(question, top_k=top_k, provider=provider)
     context = "\n\n".join([d.get("text", "") for d in docs])
     prompt = f"根据下面的上下文回答问题，并给出引用来源:\n\n{context}\n\n问题: {question}\n\n简要回答："
     if provider == "ollama":
@@ -199,11 +205,22 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     """
     cfg = load_config()
     
+    # 检查是否启用混合检索
+    hybrid_config = cfg.get("hybrid_search", {})
+    use_hybrid = hybrid_config.get("enabled", True)
+    
     # 发送检索阶段状态
     if include_state:
-        yield {"type": "state", "phase": "retrieving", "message": "正在连接 Chroma 向量库...", "progress": 0}
+        if use_hybrid:
+            yield {"type": "state", "phase": "retrieving", "message": "正在使用混合检索系统查找相关文档...", "progress": 0}
+        else:
+            yield {"type": "state", "phase": "retrieving", "message": "正在连接 Chroma 向量库...", "progress": 0}
     
-    docs = search(question, top_k=top_k, provider=provider)
+    # 使用混合检索或纯向量检索
+    if use_hybrid:
+        docs = hybrid_search(question, provider=provider)
+    else:
+        docs = search(question, top_k=top_k, provider=provider)
     
     if include_state:
         yield {"type": "state", "phase": "retrieving", "message": f"检索到 {len(docs)} 篇高度相关的文献", "progress": 25}
@@ -223,7 +240,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                 conversation_history += f"助手: {content}\n"
         conversation_history += "\n"
     
-    prompt = f"""你是遥感图像融合领域的专业智能助手，服务于遥感图像处理研究团队。你的核心研究方向包括：
+    prompt = f"""你是遥感图像融合领域的专业智能助手，服务于遥感图像处理研究团队,服务于宁波大学的RS-NBU课题组。你的核心研究方向包括：
 - 多源遥感图像融合（Multi-source Remote Sensing Image Fusion）
 - 像素级、特征级、决策级融合算法
 - 深度学习在遥感图像融合中的应用
