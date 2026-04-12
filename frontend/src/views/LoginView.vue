@@ -22,7 +22,7 @@
         </div>
         
         <!-- 邮箱（仅注册） -->
-        <div v-if="!isLogin" class="space-y-2">
+        <div v-if="!isLogin && allowRegistration" class="space-y-2">
           <label class="block text-sm font-semibold text-on-surface">邮箱</label>
           <input 
             v-model="form.email"
@@ -49,7 +49,7 @@
         </div>
         
         <!-- 确认密码（仅注册） -->
-        <div v-if="!isLogin" class="space-y-2">
+        <div v-if="!isLogin && allowRegistration" class="space-y-2">
           <label class="block text-sm font-semibold text-on-surface">确认密码</label>
           <input 
             v-model="form.confirmPassword"
@@ -68,15 +68,15 @@
         <!-- 提交按钮 -->
         <button 
           type="submit"
-          :disabled="loading"
+          :disabled="loading || configLoading"
           class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
         >
-          <span v-if="loading" class="material-symbols-outlined animate-spin">progress_activity</span>
-          {{ loading ? (isLogin ? '登录中...' : '注册中...') : (isLogin ? '登录' : '注册') }}
+          <span v-if="loading || configLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
+          {{ configLoading ? '加载中...' : (loading ? (isLogin ? '登录中...' : '注册中...') : (isLogin ? '登录' : '注册')) }}
         </button>
         
-        <!-- 切换登录/注册 -->
-        <div class="text-center">
+        <!-- 切换登录/注册（仅在允许注册时显示） -->
+        <div v-if="allowRegistration" class="text-center">
           <span class="text-on-surface-variant">
             {{ isLogin ? '还没有账号？' : '已有账号？' }}
           </span>
@@ -94,7 +94,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { authService } from '@/services/auth'
 
@@ -102,12 +102,30 @@ const router = useRouter()
 const isLogin = ref(true)
 const loading = ref(false)
 const error = ref('')
+const allowRegistration = ref(false)
+const configLoading = ref(true)
 
 const form = ref({
   username: '',
   email: '',
   password: '',
   confirmPassword: ''
+})
+
+onMounted(async () => {
+  try {
+    const config = await authService.getRegistrationConfig()
+    allowRegistration.value = config.allow_user_registration
+    // 如果注册被禁用，强制显示登录模式
+    if (!allowRegistration.value) {
+      isLogin.value = true
+    }
+  } catch (err) {
+    console.error('Failed to load registration config:', err)
+    allowRegistration.value = false
+  } finally {
+    configLoading.value = false
+  }
 })
 
 function toggleMode() {
@@ -145,6 +163,11 @@ async function handleLogin() {
 }
 
 async function handleRegister() {
+  if (!allowRegistration.value) {
+    error.value = '用户注册功能当前已禁用'
+    return
+  }
+  
   if (form.value.password !== form.value.confirmPassword) {
     error.value = '两次输入的密码不一致'
     return

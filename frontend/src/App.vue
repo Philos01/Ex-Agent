@@ -269,13 +269,14 @@ function createNewSession() {
 
 function handleLogout() {
   authService.logout()
+  store.resetState()
   router.push('/login')
 }
 
 onMounted(() => {
   window.addEventListener('resize', handleResize)
-  // 仅在应用初始化时调用一次，避免重复初始化
-  if (!store.isInitialized) {
+  // 如果用户已登录且 store 未初始化，则初始化
+  if (authService.isAuthenticated() && !store.isInitialized) {
     store.init()
     store.isInitialized = true
   }

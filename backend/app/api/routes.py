@@ -50,6 +50,15 @@ async def upload_files(files: List[UploadFile] = File(...)):
         try:
             # 检查文件类型
             if file_ext in [".pdf", ".docx", ".doc"]:
+                # 对于 PDF 文件，如果转换功能未启用，则直接上传
+                if file_ext == ".pdf" and not cfg.get("allow_pdf_conversion", False):
+                    print(f"[DEBUG] PDF 转换功能未启用，直接上传 PDF 文件: {f.filename}")
+                    dest = await save_upload(f)
+                    ingest_file(dest, provider=cfg.get("provider", "openai"))
+                    saved.append(os.path.basename(dest))
+                    print(f"[DEBUG] PDF 文件 {f.filename} 直接上传成功")
+                    continue
+                
                 # 1. 先保存文件到临时位置
                 temp_path = await save_upload(f)
                 print(f"[DEBUG] 处理文件: {temp_path}")
@@ -117,6 +126,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         metas = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
                     except Exception:
                         pass
+                    # 过滤掉已存在的同名文件记录
+                    metas = [m for m in metas if m.get("filename") != final_md_name]
                     metas.append({
                         "filename": final_md_name,
                         "upload_time": datetime.datetime.utcnow().isoformat(),
@@ -298,9 +309,14 @@ async def qa_endpoint(req: QARequest):
         else:
             # 发送空sources
             yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
-        # 然后发送answer的stream
-        for chunk in stream_answer(req.question, provider=provider, **generation_params):
-            yield f"data: {json.dumps({'type': 'content', 'content': chunk})}\n\n"
+        # 然后发送answer的stream，包含state事件
+        for item in stream_answer(req.question, provider=provider, include_state=True, **generation_params):
+            if isinstance(item, dict) and item.get('type') == 'state':
+                # 这是一个state事件
+                yield f"data: {json.dumps(item)}\n\n"
+            else:
+                # 这是一个content事件
+                yield f"data: {json.dumps({'type': 'content', 'content': item})}\n\n"
         # 发送结束信号
         yield f"data: [DONE]\n\n"
 
@@ -383,6 +399,61 @@ def set_embedding_mode(req: EmbeddingModeRequest):
         raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"切换嵌入模式失败: {str(e)}")
+
+
+@router.get("/document/preview")
+def get_document_preview(filename: str, chunk_index: int = None):
+    """
+    获取文档预览内容
+    
+    Args:
+        filename: 文档文件名
+        chunk_index: 可选，指定chunk索引进行精确定位
+    
+    Returns:
+        文档内容和元数据
+    """
+    from app.core.config import UPLOAD_DIR
+    from app.services.ingest import extract_text
+    
+    try:
+        file_path = UPLOAD_DIR / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail=f"文件 {filename} 不存在")
+        
+        # 提取文档全文
+        full_text = extract_text(str(file_path))
+        
+        # 如果指定了chunk，尝试从向量库获取该chunk
+        chunk_content = None
+        if chunk_index is not None:
+            try:
+                from app.services.vector_store import init_collection
+                collection = init_collection()
+                # 获取该文档的所有chunks
+                all_docs = collection.get(include=["documents", "metadatas"])
+                if all_docs and all_docs.get("metadatas") and all_docs.get("documents"):
+                    for i, metadata in enumerate(all_docs['metadatas']):
+                        if (metadata.get('source') == filename and 
+                            metadata.get('chunk_index') == chunk_index):
+                            chunk_content = all_docs['documents'][i]
+                            break
+            except Exception as e:
+                print(f"[DEBUG] 获取chunk失败: {e}")
+        
+        return {
+            "status": "ok",
+            "filename": filename,
+            "full_text": full_text,
+            "chunk_content": chunk_content,
+            "chunk_index": chunk_index
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取文档预览失败: {str(e)}")
 
 
 @router.post("/embedding/local-model")

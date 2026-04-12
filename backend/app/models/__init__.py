@@ -9,6 +9,7 @@ from app.models.message import Message
 from app.models.document import Document
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
+from app.models.audit_log import AuditLog
 
 __all__ = [
     'Base',
@@ -19,4 +20,5 @@ __all__ = [
     'Document',
     'Permission',
     'RolePermission',
+    'AuditLog',
 ]

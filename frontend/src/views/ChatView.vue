@@ -19,6 +19,18 @@
           >
             查看示例问题
           </button>
+          <button 
+            @click="testDataTable"
+            class="px-3 py-2 md:px-4 md:py-2 bg-primary-container rounded-xl text-primary text-sm font-medium hover:bg-primary-container/80 transition-colors"
+          >
+            测试数据表格
+          </button>
+          <button 
+            @click="testDataChart"
+            class="px-3 py-2 md:px-4 md:py-2 bg-tertiary-container rounded-xl text-tertiary text-sm font-medium hover:bg-tertiary-container/80 transition-colors"
+          >
+            测试数据图表
+          </button>
         </div>
       </div>
 
@@ -51,8 +63,15 @@
                 <span class="font-bold text-primary tracking-tight text-sm md:text-base">LUMINARY 分析报告</span>
               </div>
               
+              <!-- 思考步骤组件 -->
+              <ThinkingSteps 
+                v-if="m.thinkingState"
+                :current-state="m.thinkingState"
+                class="mb-4 md:mb-6"
+              />
+              
               <div class="text-on-surface leading-relaxed text-base md:text-[17px] space-y-3 md:space-y-4">
-                <div v-if="m.text === '' && index === messages.length - 1 && (loading || streaming)" class="flex items-center gap-2 py-2">
+                <div v-if="m.text === '' && index === messages.length - 1 && (loading || streaming) && !m.thinkingState" class="flex items-center gap-2 py-2">
                   <div class="flex gap-1">
                     <div class="w-2 h-2 bg-primary rounded-full animate-bounce" :style="{ animationDelay: '0ms' }"></div>
                     <div class="w-2 h-2 bg-primary rounded-full animate-bounce" :style="{ animationDelay: '150ms' }"></div>
@@ -60,7 +79,17 @@
                   </div>
                   <span class="text-on-surface-variant text-sm">正在生成...</span>
                 </div>
-                <div v-else v-html="m.text" class="whitespace-pre-wrap"></div>
+                <div v-else-if="m.text" v-html="m.text" class="whitespace-pre-wrap"></div>
+              </div>
+
+              <!-- 动态组件渲染 -->
+              <div v-if="m.components && m.components.length > 0" class="mt-4 md:mt-6 space-y-4">
+                <component
+                  v-for="(comp, idx) in m.components"
+                  :key="idx"
+                  :is="getComponent(comp.type)"
+                  v-bind="comp.props"
+                />
               </div>
 
               <!-- 引用来源 -->
@@ -83,8 +112,10 @@
                   <div 
                     v-for="(src, srcIndex) in getDisplaySources(m)" 
                     :key="srcIndex"
-                    class="p-3 md:p-4 bg-white rounded-lg border border-outline-variant/10 hover:border-primary/30 transition-all group cursor-pointer"
-                    @click="previewSource(src)"
+                    class="p-3 md:p-4 bg-white rounded-lg border border-outline-variant/10 hover:border-primary/30 transition-all group cursor-pointer relative"
+                    @click="openDocumentPreview(src)"
+                    @mouseenter="(e) => showHoverSource(e, src)"
+                    @mouseleave="hideHoverSource"
                   >
                     <div class="flex items-start gap-2">
                       <span class="material-symbols-outlined text-primary text-lg md:text-xl shrink-0">description</span>
@@ -107,6 +138,23 @@
         <div ref="endRef"></div>
       </div>
     </div>
+
+    <!-- 引用源悬停预览卡片 -->
+    <CitationHoverCard
+      v-if="hoverSource.visible"
+      :visible="hoverSource.visible"
+      :source="hoverSource.source"
+      :position="hoverSource.position"
+    />
+
+    <!-- 文档预览面板 -->
+    <DocumentPreviewPanel
+      :visible="documentPreview.visible"
+      :filename="documentPreview.filename"
+      :chunk-index="documentPreview.chunkIndex"
+      :source-text="documentPreview.sourceText"
+      @close="closeDocumentPreview"
+    />
 
     <!-- 输入区域 -->
     <footer class="px-4 md:px-12 py-4 md:py-8 bg-surface/50 backdrop-blur-md">
@@ -305,6 +353,10 @@ import { useAppStore } from '../stores/appStore'
 import { useRoute } from 'vue-router'
 import api from '../services/api'
 import { sessionService } from '../services/sessions'
+import ThinkingSteps from '../components/gen-ui/ThinkingSteps.vue'
+import CitationHoverCard from '../components/gen-ui/CitationHoverCard.vue'
+import DocumentPreviewPanel from '../components/gen-ui/DocumentPreviewPanel.vue'
+import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
 
 const store = useAppStore()
 const route = useRoute()
@@ -361,6 +413,20 @@ const endRef = ref(null)
 const scrollRef = ref(null)
 const windowWidth = ref(window.innerWidth)
 const savingMessage = ref(false)
+
+// 引用源悬停预览状态
+const hoverSource = ref({
+  visible: false,
+  source: null,
+  position: { x: 0, y: 0 }
+})
+
+// 文档预览面板状态
+const documentPreview = ref({
+  visible: false,
+  filename: null,
+  chunkIndex: null
+})
 
 const isMobile = computed(() => windowWidth.value < 768)
 
@@ -437,6 +503,76 @@ const handleSampleQuestion = (question) => {
   sendStream()
 }
 
+// 测试数据表格
+const testDataTable = () => {
+  const userMsg = '测试数据表格'
+  const userMessage = { 
+    id: `temp_${Date.now()}`,
+    role: 'user', 
+    text: userMsg, 
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) 
+  }
+  messages.value.push(userMessage)
+
+  const assistantMessage = { 
+    id: `temp_${Date.now() + 1}`,
+    role: 'assistant', 
+    text: '这是一个测试数据表格，展示不同催化剂的性能对比：', 
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    sources: [],
+    thinkingState: null,
+    components: [
+      {
+        type: 'DataTable',
+        props: {
+          columns: ['催化剂', '产率', '反应温度', '反应时间', '溶剂'],
+          data: [
+            ['Pd/C', '92%', '80°C', '4h', '乙醇'],
+            ['Pt/C', '85%', '90°C', '6h', '甲醇'],
+            ['Ru/C', '78%', '75°C', '5h', '异丙醇'],
+            ['Rh/C', '88%', '85°C', '3h', '甲苯'],
+            ['Ir/C', '95%', '70°C', '8h', '二氯甲烷']
+          ]
+        }
+      }
+    ]
+  }
+  messages.value.push(assistantMessage)
+}
+
+// 测试数据图表
+const testDataChart = () => {
+  const userMsg = '测试数据图表'
+  const userMessage = { 
+    id: `temp_${Date.now()}`,
+    role: 'user', 
+    text: userMsg, 
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }) 
+  }
+  messages.value.push(userMessage)
+
+  const assistantMessage = { 
+    id: `temp_${Date.now() + 1}`,
+    role: 'assistant', 
+    text: '这是一个测试数据图表，展示不同温度下的产率变化：', 
+    time: new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' }),
+    sources: [],
+    thinkingState: null,
+    components: [
+      {
+        type: 'DataChart',
+        props: {
+          labels: ['60°C', '70°C', '80°C', '90°C', '100°C'],
+          values: [65, 78, 92, 85, 70],
+          type: 'bar',
+          title: '温度对产率的影响'
+        }
+      }
+    ]
+  }
+  messages.value.push(assistantMessage)
+}
+
 const getUniqueSources = (sources) => {
   const seen = new Set()
   return sources.filter(s => {
@@ -461,11 +597,48 @@ const toggleSourcesExpand = (message) => {
   message.sourcesExpanded = !message.sourcesExpanded
 }
 
-// 预览来源
+// 显示引用源悬停预览
+const showHoverSource = (event, source) => {
+  const rect = event.target.getBoundingClientRect()
+  hoverSource.value = {
+    visible: true,
+    source: source,
+    position: {
+      x: rect.left,
+      y: rect.bottom + window.scrollY
+    }
+  }
+}
+
+// 隐藏引用源悬停预览
+const hideHoverSource = () => {
+  hoverSource.value.visible = false
+}
+
+// 打开文档预览面板
+const openDocumentPreview = (source) => {
+  const filename = source.source || source.filename
+  const chunkIndex = source.chunk_index !== undefined ? source.chunk_index : null
+  const sourceText = source.text || null
+  
+  documentPreview.value = {
+    visible: true,
+    filename: filename,
+    chunkIndex: chunkIndex,
+    sourceText: sourceText
+  }
+}
+
+// 关闭文档预览面板
+const closeDocumentPreview = () => {
+  documentPreview.value.visible = false
+  documentPreview.value.filename = null
+  documentPreview.value.chunkIndex = null
+}
+
+// 预览来源（保留向后兼容）
 const previewSource = (source) => {
-  const filename = source.source || source.filename || '文档'
-  const text = source.text || '暂无内容预览'
-  alert(`【${filename}】\n\n${text.substring(0, 500)}${text.length > 500 ? '...' : ''}`)
+  openDocumentPreview(source)
 }
 
 const handleKeyDown = (e) => {
@@ -509,7 +682,9 @@ const sendStream = async () => {
     role: 'assistant', 
     text: '', 
     time: '正在生成...', 
-    sources: [] 
+    sources: [],
+    thinkingState: null,
+    components: []
   }
   messages.value.push(assistantMessage)
   
@@ -588,6 +763,22 @@ const sendStream = async () => {
               sources = parsed.sources || []
               const lastIndex = messages.value.length - 1
               messages.value[lastIndex].sources = sources
+            } else if (parsed.type === 'state') {
+              const lastIndex = messages.value.length - 1
+              messages.value[lastIndex].thinkingState = {
+                phase: parsed.phase,
+                message: parsed.message,
+                progress: parsed.progress
+              }
+              scrollToBottom()
+            } else if (parsed.type === 'component') {
+              const lastIndex = messages.value.length - 1
+              messages.value[lastIndex].components = messages.value[lastIndex].components || []
+              messages.value[lastIndex].components.push({
+                type: parsed.component,
+                props: parsed.props
+              })
+              scrollToBottom()
             }
           } catch (e) {
             console.error('Parse error:', e)

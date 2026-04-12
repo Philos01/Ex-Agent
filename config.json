@@ -1,16 +1,16 @@
 {
   "provider": "openai",
-  "embedding_mode": "local",
+  "embedding_mode": "openai",
   "local_embedding_model": "Qwen/Qwen3-Embedding-0.6B",
   "local_model_cache_dir": "",
   "openai_api_key": "hk-o65h0u10000551061c459307b992deafff94f3d9b53d13f1",
   "openai_base_url": "https://api.openai-hk.com/v1",
   "openai_embedding_model": "text-embedding-3-small",
-  "openai_chat_model": "gpt-3.5-turbo",
+  "openai_chat_model": "gpt-5-nano",
   "ollama_url": "http://localhost:11434",
   "ollama_model": "Qwen3:4B",
-  "chunk_size": 1500,
-  "chunk_overlap": 100,
+  "chunk_size": 256,
+  "chunk_overlap": 25,
   "temperature": 0.7,
   "top_k": 5,
   "top_p": 0.9,
@@ -21,5 +21,6 @@
   "upload_max_size": 104857600,
   "test_key": "test_value",
   "test": "data",
-  "enable_thinking": false
+  "enable_thinking": false,
+  "allow_user_registration": false
 }

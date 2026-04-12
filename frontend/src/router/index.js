@@ -1,5 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { authService } from '@/services/auth'
+import { useAppStore } from '@/stores/appStore'
 
 const routes = [
   {
@@ -38,15 +39,23 @@ const router = createRouter({
 })
 
 // Route guard
-router.beforeEach((to, from, next) => {
+router.beforeEach(async (to, from, next) => {
   const requiresAuth = to.meta.requiresAuth !== false
   const isAuthenticated = authService.isAuthenticated()
+  const store = useAppStore()
   
   if (requiresAuth && !isAuthenticated) {
     next('/login')
   } else if (to.path === '/login' && isAuthenticated) {
     next('/chat')
   } else {
+    // 如果用户从登录页进入应用，确保初始化store
+    if (from.path === '/login' && to.meta.requiresAuth) {
+      if (!store.isInitialized) {
+        store.init()
+        store.isInitialized = true
+      }
+    }
     next()
   }
 })

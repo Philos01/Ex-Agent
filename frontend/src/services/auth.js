@@ -34,6 +34,30 @@ export const authService = {
     return response.data
   },
 
+  async getRegistrationConfig() {
+    const response = await api.get('/auth/registration-config')
+    return response.data
+  },
+
+  async updateRegistrationConfig(allowRegistration) {
+    const response = await api.put('/auth/registration-config', {
+      allow_registration: allowRegistration
+    })
+    return response.data
+  },
+
+  async getPdfConversionConfig() {
+    const response = await api.get('/auth/pdf-conversion-config')
+    return response.data
+  },
+
+  async updatePdfConversionConfig(allowPdfConversion) {
+    const response = await api.put('/auth/pdf-conversion-config', {
+      allow_pdf_conversion: allowPdfConversion
+    })
+    return response.data
+  },
+
   logout() {
     localStorage.removeItem('auth_token')
     localStorage.removeItem('user_info')

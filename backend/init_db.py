@@ -15,7 +15,8 @@ from app.models import (
     Message,
     Document,
     Permission,
-    RolePermission
+    RolePermission,
+    AuditLog
 )
 
 def create_tables():

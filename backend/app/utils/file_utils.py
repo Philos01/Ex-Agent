@@ -18,12 +18,14 @@ async def save_upload(file: UploadFile) -> str:
         content = await file.read()
         await out.write(content)
         size = len(content)
-    # update metadata
+    # update metadata - 先删除已存在的同名文件记录，再添加新记录
     metas = []
     try:
         metas = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
     except Exception:
         metas = []
+    # 过滤掉已存在的同名文件记录
+    metas = [m for m in metas if m.get("filename") != file.filename]
     metas.append({
         "filename": file.filename,
         "upload_time": datetime.datetime.utcnow().isoformat(),

@@ -67,7 +67,9 @@ DEFAULT_CONFIG: Dict = {
     "presence_penalty": 0.0,
     "frequency_penalty": 0.0,
     "max_history": 10,
-    "upload_max_size": 104857600
+    "upload_max_size": 104857600,
+    "allow_user_registration": False,
+    "allow_pdf_conversion": False
 }
 
 

@@ -2,8 +2,15 @@
   <div class="px-4 md:px-12 py-6 md:py-8 max-w-5xl mx-auto space-y-6 md:space-y-10">
     <div class="space-y-2">
       <h1 class="text-2xl md:text-4xl font-black text-on-surface tracking-tight">系统设置</h1>
-      <div class="flex items-center gap-3 md:gap-4">
+      <div class="flex items-center gap-3 md:gap-4 flex-wrap">
         <div class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-widest">v2.4.0-Stable</div>
+        <!-- 调试信息 -->
+        <div class="px-3 py-1 rounded-full bg-tertiary-container text-on-tertiary-container text-[10px] font-bold">
+          用户角色: {{ currentUserRole }}
+        </div>
+        <div class="px-3 py-1 rounded-full text-[10px] font-bold" :class="isAdmin ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'">
+          管理员权限: {{ isAdmin ? '是' : '否' }}
+        </div>
       </div>
     </div>
 
@@ -126,6 +133,7 @@
             <option value="gpt-4-turbo">GPT-4 Turbo</option>
             <option value="gpt-4o">GPT-4o</option>
             <option value="gpt-4o-mini">GPT-4o Mini</option>
+            <option value="gpt-5-nano">GPT-5-nano</option>
             <option value="gpt-5">GPT-5</option>
           </select>
         </div>
@@ -154,6 +162,78 @@
       </div>
     </section>
 
+    <!-- 用户注册配置（仅管理员可见） -->
+    <section v-if="isAdmin" class="space-y-4 md:space-y-6">
+      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">用户注册配置</h2>
+      
+      <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="font-bold text-on-surface text-lg">允许用户注册</h3>
+            <p class="text-sm text-on-surface-variant mt-1">启用后，新用户可以通过登录页面注册账号</p>
+          </div>
+          <button
+            @click="allowUserRegistration = !allowUserRegistration"
+            :disabled="registrationConfigLoading"
+            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            :class="allowUserRegistration ? 'bg-primary' : 'bg-outline-variant'"
+          >
+            <div
+              class="absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow transition-transform duration-300"
+              :class="allowUserRegistration ? 'translate-x-8' : 'translate-x-0'"
+            />
+          </button>
+        </div>
+        
+        <div class="pt-4 border-t border-outline-variant/20">
+          <button
+            @click="updateRegistrationConfig"
+            :disabled="registrationConfigLoading"
+            class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <span v-if="registrationConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
+            {{ registrationConfigLoading ? '更新中...' : '保存注册配置' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- PDF 转换配置（仅管理员可见） -->
+    <section v-if="isAdmin" class="space-y-4 md:space-y-6">
+      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">PDF 转换配置</h2>
+      
+      <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4">
+        <div class="flex items-center justify-between">
+          <div>
+            <h3 class="font-bold text-on-surface text-lg">允许 PDF 转换</h3>
+            <p class="text-sm text-on-surface-variant mt-1">启用后，用户可以上传并转换 PDF 文件为 Markdown</p>
+          </div>
+          <button
+            @click="allowPdfConversion = !allowPdfConversion"
+            :disabled="pdfConversionConfigLoading"
+            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            :class="allowPdfConversion ? 'bg-primary' : 'bg-outline-variant'"
+          >
+            <div
+              class="absolute top-1 left-1 w-6 h-6 bg-white rounded-full shadow transition-transform duration-300"
+              :class="allowPdfConversion ? 'translate-x-8' : 'translate-x-0'"
+            />
+          </button>
+        </div>
+        
+        <div class="pt-4 border-t border-outline-variant/20">
+          <button
+            @click="updatePdfConversionConfig"
+            :disabled="pdfConversionConfigLoading"
+            class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            <span v-if="pdfConversionConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
+            {{ pdfConversionConfigLoading ? '更新中...' : '保存 PDF 转换配置' }}
+          </button>
+        </div>
+      </div>
+    </section>
+
     <!-- 保存按钮 -->
     <div class="pt-6 md:pt-8">
       <button 
@@ -169,13 +249,24 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watchEffect } from 'vue'
 import api from '../services/api'
+import { authService } from '../services/auth'
 
 const loading = ref(true)
 const saving = ref(false)
 const showPassword = ref(false)
 const error = ref('')
+const isAdmin = ref(false)
+const allowUserRegistration = ref(false)
+const registrationConfigLoading = ref(false)
+const allowPdfConversion = ref(false)
+const pdfConversionConfigLoading = ref(false)
+
+const currentUserRole = computed(() => {
+  const userInfo = authService.getUserInfo()
+  return userInfo?.role || '未知'
+})
 
 const cfg = ref({
   provider: 'openai',
@@ -261,7 +352,88 @@ const handleOllamaModelChange = () => {
   // 自动保存
 }
 
+const loadCurrentUser = async () => {
+  try {
+    console.log('[DEBUG] Fetching current user from backend...')
+    const user = await authService.getCurrentUser()
+    console.log('[DEBUG] Current user from backend:', user)
+    
+    // 更新 localStorage 中的用户信息
+    localStorage.setItem('user_info', JSON.stringify(user))
+    
+    isAdmin.value = user?.role?.toLowerCase() === 'admin'
+    console.log('[DEBUG] Is admin (from backend):', isAdmin.value)
+  } catch (e) {
+    console.error('[DEBUG] Failed to fetch current user:', e)
+    // 降级使用 localStorage
+    const userInfo = authService.getUserInfo()
+    console.log('[DEBUG] Using user info from localStorage:', userInfo)
+    isAdmin.value = userInfo?.role?.toLowerCase() === 'admin'
+  }
+}
+
+const loadRegistrationConfig = async () => {
+  try {
+    // 先获取最新的用户信息
+    await loadCurrentUser()
+    
+    if (isAdmin.value) {
+      const config = await authService.getRegistrationConfig()
+      allowUserRegistration.value = config.allow_user_registration
+    }
+  } catch (e) {
+    console.error('Failed to load registration config:', e)
+  }
+}
+
+const updateRegistrationConfig = async () => {
+  try {
+    registrationConfigLoading.value = true
+    await authService.updateRegistrationConfig(allowUserRegistration.value)
+    alert('注册配置更新成功！')
+  } catch (e) {
+    console.error('Failed to update registration config:', e)
+    const errorMsg = e.response?.data?.detail || e.message || '更新失败'
+    alert(`更新失败: ${errorMsg}`)
+  } finally {
+    registrationConfigLoading.value = false
+  }
+}
+
+const loadPdfConversionConfig = async () => {
+  try {
+    if (isAdmin.value) {
+      const config = await authService.getPdfConversionConfig()
+      allowPdfConversion.value = config.allow_pdf_conversion
+    }
+  } catch (e) {
+    console.error('Failed to load PDF conversion config:', e)
+  }
+}
+
+const updatePdfConversionConfig = async () => {
+  try {
+    pdfConversionConfigLoading.value = true
+    await authService.updatePdfConversionConfig(allowPdfConversion.value)
+    alert('PDF 转换配置更新成功！')
+  } catch (e) {
+    console.error('Failed to update PDF conversion config:', e)
+    const errorMsg = e.response?.data?.detail || e.message || '更新失败'
+    alert(`更新失败: ${errorMsg}`)
+  } finally {
+    pdfConversionConfigLoading.value = false
+  }
+}
+
+// 动态监测用户信息变化
+watchEffect(() => {
+  const userInfo = authService.getUserInfo()
+  isAdmin.value = userInfo?.role?.toLowerCase() === 'admin'
+})
+
 onMounted(() => {
   load()
+  loadRegistrationConfig()
+  loadPdfConversionConfig()
 })
 </script>

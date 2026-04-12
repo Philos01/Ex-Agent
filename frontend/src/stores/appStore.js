@@ -191,6 +191,19 @@ export const useAppStore = defineStore('app', () => {
     localStorage.setItem('luminar_params', JSON.stringify(chatParams.value))
   }
 
+  // 重置应用状态（用于登出或切换用户时）
+  function resetState() {
+    console.log('[DEBUG] Resetting app store state...')
+    currentView.value = 'chat'
+    sessionHistory.value = []
+    currentSessionId.value = null
+    chatMessages.value = []
+    isLoading.value = false
+    isSessionsLoaded.value = false
+    isInitialized.value = false
+    console.log('[DEBUG] App store state reset complete')
+  }
+
   // 初始化
   function init() {
     console.log('[DEBUG] Initializing app store...')
@@ -220,6 +233,7 @@ export const useAppStore = defineStore('app', () => {
     updateChatParams,
     saveCurrentSessionToDatabase,
     loadSessionsFromDatabase,
-    init
+    init,
+    resetState
   }
 })

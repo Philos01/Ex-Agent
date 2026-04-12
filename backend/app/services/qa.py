@@ -181,7 +181,7 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5) -> 
 def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None, 
                   top_p: float = None, max_tokens: int = None, 
                   presence_penalty: float = None, frequency_penalty: float = None,
-                  messages: List[dict] = None):
+                  messages: List[dict] = None, include_state: bool = False):
     """
     流式回答问题
     
@@ -195,9 +195,19 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         presence_penalty: 存在惩罚
         frequency_penalty: 频率惩罚
         messages: 对话历史，格式为 [{"role": "user"|"assistant", "content": "..."}]
+        include_state: 是否包含思考状态事件输出
     """
     cfg = load_config()
+    
+    # 发送检索阶段状态
+    if include_state:
+        yield {"type": "state", "phase": "retrieving", "message": "正在连接 Chroma 向量库...", "progress": 0}
+    
     docs = search(question, top_k=top_k, provider=provider)
+    
+    if include_state:
+        yield {"type": "state", "phase": "retrieving", "message": f"检索到 {len(docs)} 篇高度相关的文献", "progress": 25}
+    
     context = "\n\n".join([d.get("text", "") for d in docs])
     
     # 构建包含对话历史的消息列表
@@ -312,7 +322,15 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         chunk = re.sub(r'^\s+', '', chunk, flags=re.MULTILINE)
         
         return chunk
+
+    # 发送分析阶段状态
+    if include_state:
+        yield {"type": "state", "phase": "analyzing", "message": "正在分析检索结果...", "progress": 50}
     
+    # 发送生成阶段状态
+    if include_state:
+        yield {"type": "state", "phase": "generating", "message": f"正在使用 {provider} 模型生成回答...", "progress": 75}
+
     if provider == "ollama":
         # Ollama流式响应 - 使用官方SDK或回退到HTTP请求
         try:
@@ -394,10 +412,15 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                         except Exception as e:
                             print(f"[DEBUG] Failed to parse JSON: {e}")
                             pass
+            # Ollama 流式结束，发送 done 状态
+            if include_state:
+                yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
         except Exception as e:
             print(f"[ERROR] Ollama stream failed: {str(e)}")
             import traceback
             traceback.print_exc()
+            if include_state:
+                yield {"type": "state", "phase": "done", "message": "生成出错", "progress": 100}
             yield f"无法连接 Ollama 服务，请检查配置。错误: {str(e)}"
     else:
         # OpenAI流式响应
@@ -434,8 +457,13 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                     content = chunk.choices[0].delta.content
                     processed_chunk = process_stream_chunk(content)
                     yield processed_chunk
+            # OpenAI 流式结束，发送 done 状态
+            if include_state:
+                yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
         except Exception as e:
             print(f"[ERROR] OpenAI stream failed: {str(e)}")
             import traceback
             traceback.print_exc()
+            if include_state:
+                yield {"type": "state", "phase": "done", "message": "生成出错", "progress": 100}
             yield f"LLM 调用失败，请检查配置与网络。错误: {str(e)}"
