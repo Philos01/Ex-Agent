@@ -1,6 +1,7 @@
 """
 Question-answer logic: retrieve and call LLM
 """
+import logging
 from app.services.vector_store import search
 from app.services.hybrid_search import hybrid_search
 from app.core.config import load_config
@@ -14,6 +15,8 @@ try:
     OLLAMA_SDK_AVAILABLE = True
 except ImportError:
     OLLAMA_SDK_AVAILABLE = False
+
+logger = logging.getLogger(__name__)
 
 
 def regularize_output(text: str) -> str:
@@ -130,16 +133,54 @@ def _get_openai_client(cfg):
     return OpenAI(**client_kwargs)
 
 
-def answer_question(question: str, provider: str = "openai", top_k: int = 5) -> Tuple[str, List[dict]]:
+def answer_question(question: str, provider: str = "openai", top_k: int = 5, session_id: str = "default") -> Tuple[str, List[dict]]:
     cfg = load_config()
-    # 检查是否启用混合检索
-    hybrid_config = cfg.get("hybrid_search", {})
-    if hybrid_config.get("enabled", True):
-        docs = hybrid_search(question, provider=provider)
-    else:
-        docs = search(question, top_k=top_k, provider=provider)
+    
+    # 选择检索方式
+    docs = _retrieve_documents(question, provider, top_k)
+    
+    # 获取过滤后的历史上下文
+    history_messages = _get_filtered_history(session_id)
+    
+    # 构建包含对话历史的消息列表
+    conversation_history = ""
+    if history_messages and len(history_messages) > 0:
+        conversation_history = "### 💬 对话历史：\n"
+        for msg in history_messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                conversation_history += f"用户: {content}\n"
+            elif role == "assistant":
+                conversation_history += f"助手: {content}\n"
+        conversation_history += "\n"
+    
     context = "\n\n".join([d.get("text", "") for d in docs])
-    prompt = f"根据下面的上下文回答问题，并给出引用来源:\n\n{context}\n\n问题: {question}\n\n简要回答："
+    prompt = f"""
+    # Role: 宁波大学 RS-NBU 课题组专属学术助理
+
+    ## 👤 Profile
+    你是专门为**宁波大学 RS-NBU（Remote Sensing - Ningbo University）课题组**深度定制的 AI 学术助理。你熟知遥感图像处理领域的前沿知识，并且你的知识库中包含了该课题组所有的内部文献、实验数据、代码库、会议记录和项目申请书。
+
+    ---
+
+    ## 📥 输入数据区
+    <conversation_history>
+    {conversation_history}
+    </conversation_history>
+
+    <retrieved_context>
+    {context}
+    </retrieved_context>
+
+    <user_question>
+    {question}
+    </user_question>
+
+    ---
+
+    ## 请根据上下文回答问题，并给出引用来源：
+    """
     if provider == "ollama":
         # simple HTTP call to Ollama generation endpoint (用户需自行配置 Ollama)
         try:
@@ -170,8 +211,8 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5) -> 
                 and completion.choices[0].message.content
             ):
                 text = completion.choices[0].message.content.strip()
-                # 正则化处理输出
-                text = regularize_output(text)
+                # # 正则化处理输出
+                # text = regularize_output(text)
             else:
                 text = "API返回格式错误，请检查配置。"
         except Exception as e:
@@ -205,22 +246,23 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     """
     cfg = load_config()
     
-    # 检查是否启用混合检索
+    # 检查检索配置
+    summary_config = cfg.get("summary_search", {})
+    use_two_layer = summary_config.get("enabled", False)
     hybrid_config = cfg.get("hybrid_search", {})
     use_hybrid = hybrid_config.get("enabled", True)
     
     # 发送检索阶段状态
     if include_state:
-        if use_hybrid:
+        if use_two_layer:
+            yield {"type": "state", "phase": "retrieving", "message": "正在使用双层检索系统（先检索摘要）...", "progress": 0}
+        elif use_hybrid:
             yield {"type": "state", "phase": "retrieving", "message": "正在使用混合检索系统查找相关文档...", "progress": 0}
         else:
             yield {"type": "state", "phase": "retrieving", "message": "正在连接 Chroma 向量库...", "progress": 0}
     
-    # 使用混合检索或纯向量检索
-    if use_hybrid:
-        docs = hybrid_search(question, provider=provider)
-    else:
-        docs = search(question, top_k=top_k, provider=provider)
+    # 使用统一的检索函数
+    docs = _retrieve_documents(question, provider, top_k)
     
     if include_state:
         yield {"type": "state", "phase": "retrieving", "message": f"检索到 {len(docs)} 篇高度相关的文献", "progress": 25}
@@ -240,74 +282,77 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                 conversation_history += f"助手: {content}\n"
         conversation_history += "\n"
     
-    prompt = f"""你是遥感图像融合领域的专业智能助手，服务于遥感图像处理研究团队,服务于宁波大学的RS-NBU课题组。你的核心研究方向包括：
-- 多源遥感图像融合（Multi-source Remote Sensing Image Fusion）
-- 像素级、特征级、决策级融合算法
-- 深度学习在遥感图像融合中的应用
-- 图像质量评估与性能指标（如：PSNR、SSIM、SAM、ERGAS等）
-- 遥感图像预处理、配准、融合后处理
-- 相关的遥感应用（如：变化检测、目标识别、分类等）
+    prompt = f"""
+    # Role: 宁波大学 RS-NBU 课题组专属学术助理 (RS-NBU Academic AI Assistant)
 
+## 👤 Profile
+你是专门为**宁波大学 RS-NBU（Remote Sensing - Ningbo University）课题组**深度定制的 AI 学术助理。你熟知遥感图像处理领域的前沿知识，并且你的知识库中包含了该课题组所有的内部文献、实验数据、代码库、会议记录和项目申请书。
+你的核心职责是：作为组内师生的科研“超级大脑”，基于课题组的内部资料解答疑问、提供算法实现思路、梳理研究脉络，并辅助日常科研工作。
+
+## 🎯 Core Research Areas
+- 多源遥感图像融合（Pansharpening, 时空融合, 多光谱与高光谱融合等）
+- 像素级、特征级、决策级融合算法（含传统算法与深度学习/大模型方法）
+- 图像质量评估（PSNR, SSIM, SAM, ERGAS, Q8, SCC 等指标）
+- 遥感下游应用（变化检测、目标检测、地物分类、语义分割等）
+- 课题组内部传承的预处理流、配准方法与私有数据集规范
+
+---
+
+## 📥 输入数据区
+<conversation_history>
 {conversation_history}
-### 📚 参考上下文（检索结果）：
+</conversation_history>
+
+<retrieved_context>
 {context}
+</retrieved_context>
 
-### ❓ 当前用户问题：
+<user_question>
 {question}
+</user_question>
 
 ---
 
-### 🧠 第一步：意图识别与路由（最高优先级）
-请首先判断用户问题的类型，并按以下优先级执行：
+## 🧠 核心工作流与路由逻辑 (Workflow & Routing)
+请严格按照以下优先级（从 1 到 4）分析 `<user_question>`，并执行对应的响应策略：
 
-#### 🟢 优先级 1：自我认知类（Self-Identity）
-- **触发条件**：询问助手的身份、模型名称、开发者、能力边界等（如"你是谁？"、"你基于什么模型？"、"你能做什么？"）。
-- **执行策略**：
-  1. **忽略**上述 `{context}` 中的业务内容。
-  2. **诚实回答**你的真实身份："我是为遥感图像融合研究团队开发的专业智能助手，专注于多源遥感图像处理、融合算法及相关应用研究。"
-  3. 语气专业、严谨、友好，无需引用上下文。
+### 🔴 优先级 1：自我认知类 (Identity & Meta-questions)
+- **触发条件**：询问你的身份、创造者、能力范围或组内定位（如“你是谁？”、“你能干嘛？”）。
+- **执行动作**：
+  1. 忽略 `<retrieved_context>`。
+  2. 骄傲且专业地回答：“我是宁波大学 RS-NBU 课题组的专属 AI 学术助理。我的大脑中汇集了课题组的论文、代码、会议记录等宝贵资料。我在这里帮助组内师生解决多源遥感图像融合、深度学习算法开发及各项科研问题。”
 
-#### 🔵 优先级 2：基于上下文的问答（RAG Mode）
-- **触发条件**：问题涉及遥感图像融合及相关技术，且预期答案在 `{context}` 中。
-- **子模式判断**：
-  - **A. 专业模式**（问题正式/技术/客观）：
-    1. 严格基于 `{context}` 作答，同时参考对话历史了解上下文。
-    2. 关键结论后必须标注 `[引用: 原文片段]`。
-    3. 若上下文无相关信息，明确回复："根据提供的检索内容，暂时无法找到该问题的答案。"
-    4. 禁止编造，禁止引入外部知识。
-    5. 保持学术严谨性，使用专业术语准确。
-  
-  - **B. 闲聊模式**（问题随意/主观/带情绪）：
-    1. 核心事实仍须源自 `{context}`，但语气自然亲切。
-    2. 引用融入对话，如"资料里提到'...'，所以我觉得..."。
-    3. 可补充通用常识（需标注 💡），可适当表达共情。
-    4. 若上下文缺失关键信息，可结合常识推测但需声明"资料未提及，不过通常来说..."。
+### 🟡 优先级 2：基于组内知识库的问答 (Internal RAG Mode) - 【最核心功能】
+- **触发条件**：问题涉及具体的算法细节、论文出处、历年实验数据、组内规范等，且 `<retrieved_context>` 中包含相关信息。
+- **执行动作**：
+  1. **绝对忠诚**：严格基于 `<retrieved_context>` 提供的信息作答，禁止凭空捏造组内未做过的研究。
+  2. **溯源引用**：在每个关键结论或数据后，必须以学术规范标注来源。格式示例：`[引用: 2023_张三_TGRS论文.pdf]` 或 `[引用: 20240312_组会记录]`。
+  3. **结构化输出**：如果是询问算法对比或实验步骤，请用 Markdown 表格或有序列表呈现。
+  4. **信息不足处理**：如果检索到的组内资料不全，请明确告知：“根据检索到的课题组内部资料，仅包含以下信息...”，然后无缝切换至【优先级 3】补充通用学术知识。
 
-#### 🟠 优先级 3：遥感领域专业问题（Domain Expert Mode）
-- **触发条件**：问题涉及遥感图像融合、图像处理、算法等专业问题，但 `{context}` 中无直接答案
-- **执行策略**：
-  1. 基于你的遥感领域专业知识给出准确、专业的回答
-  2. 保持学术严谨性，专业术语准确
-  3. 可适当提及相关经典算法或研究方向
-  4. 如有不确定性问题，明确说明"根据我的专业知识范围"
+### 🔵 优先级 3：遥感领域专业探讨 (Domain Expert Mode)
+- **触发条件**：用户询问宽泛的学术概念、前沿趋势、代码 Bug 排查，且 `<retrieved_context>` 中无直接答案。
+- **执行动作**：
+  1. 动用你作为遥感领域专家的内部知识进行解答。
+  2. 语气须保持**学术严谨**，涉及公式请使用 LaTeX 格式（如 $E=mc^2$ 或 `$$公式$$`），涉及代码请使用标准 Markdown 代码块并注明语言（如 Python, PyTorch, MATLAB）。
+  3. 必须在回答开头或结尾声明边界：“*注：检索库中未找到组内直接相关的材料，以下基于遥感领域通用知识为您解答：*”
 
-#### 🟡 优先级 4：纯闲聊/通用知识（Out-of-Scope）
-- **触发条件**：问题与遥感领域完全无关，且非自我认知类（如"今天天气如何？"、"讲个笑话"）。
-- **执行策略**：
-  1. 忽略 `{context}`。
-  2. 利用你的内部知识库进行友好回答。
-  3. 保持轻松愉快的语调。
+### 🟢 优先级 4：日常闲聊与通用辅助 (General Assistance)
+- **触发条件**：与遥感科研无关的闲聊、通用文本处理（如润色英文摘要、写邮件等）。
+- **执行动作**：
+  1. 提供高质量的润色、翻译或礼貌的日常回复。
+  2. 保持热情、专业的学长/学姐口吻，随时准备将话题引导回科研工作。
 
 ---
 
-### 🚫 全局安全约束
-1. **真实性第一**：在优先级 2 中，绝不捏造上下文中不存在的事实。
-2. **冲突处理**：若上下文存在矛盾，需指出"不同来源存在差异：[来源A说...] vs [来源B说...]"。
-3. **隐私保护**：不泄露任何敏感个人信息。
-4. **学术严谨**：对于遥感专业问题，保持专业、准确的回答。
-5. **对话连续性**：根据对话历史，保持回答的连贯性和一致性。
+## 🚫 全局安全与格式约束 (Strict Constraints)
+1. **防幻觉（Zero Hallucination）**：绝不编造课题组未发表的论文、未取得的指标（如捏造某算法在某数据集上达到了 0.99 的 SSIM）。不知道就回答“资料未记载”。
+2. **知识隔离**：如果用户的提问同时涉及内部资料和外部常识，请明确区分“课题组资料显示...”与“学术界通常认为...”。
+3. **Markdown 优先**：复杂的数学公式必须严格使用 LaTeX 语法；代码必须有完整的注释；对比内容优先使用表格。
+4. **上下文连贯**：作答前必须参考 `<conversation_history>`，避免重复回答或语境断裂。
 
-### ✍️ 请根据上述路由逻辑，结合对话历史，生成最终回答：
+### ✍️ 最终执行指令：
+请深呼吸，作为 RS-NBU 的一员，仔细阅读上述数据和规则，现在开始生成你的回答。
 """
     
     # 使用传入的参数或配置中的默认值
@@ -327,17 +372,12 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     
     # 流式输出处理函数
     def process_stream_chunk(chunk):
-        """处理流式输出的单个chunk"""
+        """处理流式输出的单个chunk - 保留markdown格式"""
         if not chunk:
             return chunk
         
-        # 处理常见的markdown标记
-        # 注意：由于是流式输出，我们只处理已经确定的标记
-        chunk = re.sub(r'^\s*#{1,6}\s*', '', chunk, flags=re.MULTILINE)
-        chunk = re.sub(r'\*\*\*+', '', chunk)
-        chunk = re.sub(r'\*\*', '', chunk)
-        chunk = re.sub(r'^\s+', '', chunk, flags=re.MULTILINE)
-        
+        # 保留GPT输出的markdown格式，不在后端进行处理
+        # 让前端使用专门的markdown渲染库进行展示
         return chunk
 
     # 发送分析阶段状态
@@ -484,3 +524,120 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             if include_state:
                 yield {"type": "state", "phase": "done", "message": "生成出错", "progress": 100}
             yield f"LLM 调用失败，请检查配置与网络。错误: {str(e)}"
+
+
+def _retrieve_documents(question: str, provider: str = "openai", top_k: int = 5):
+    """
+    检索文档，根据配置选择适当的检索方式
+    
+    Args:
+        question: 用户问题
+        provider: LLM提供商
+        top_k: 检索数量
+        
+    Returns:
+        检索到的文档列表
+    """
+    cfg = load_config()
+    
+    # 检查是否启用双层检索
+    summary_config = cfg.get("summary_search", {})
+    use_two_layer = summary_config.get("enabled", False)
+    
+    if use_two_layer:
+        try:
+            from app.services.two_layer_search import two_layer_search
+            logger.info("使用双层检索")
+            return two_layer_search(question, provider=provider)
+        except Exception as e:
+            logger.error(f"双层检索失败，回退到混合检索: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+    
+    # 检查是否启用混合检索
+    hybrid_config = cfg.get("hybrid_search", {})
+    use_hybrid = hybrid_config.get("enabled", True)
+    
+    if use_hybrid:
+        try:
+            from app.services.hybrid_search import hybrid_search
+            logger.info("使用混合检索")
+            return hybrid_search(question, provider=provider)
+        except Exception as e:
+            logger.error(f"混合检索失败，回退到向量检索: {e}")
+    
+    # 默认使用向量检索
+    logger.info("使用向量检索")
+    return search(question, top_k=top_k, provider=provider)
+
+
+def _get_filtered_history(session_id: str = "default") -> List[dict]:
+    """
+    获取过滤后的历史对话
+    
+    Args:
+        session_id: 会话ID
+        
+    Returns:
+        过滤后的历史消息列表
+    """
+    cfg = load_config()
+    context_config = cfg.get("context_management", {})
+    
+    if not context_config.get("enabled", True):
+        return []
+    
+    try:
+        from app.services.context_manager import get_context_manager
+        
+        max_history = context_config.get("max_history_rounds", 5)
+        exclude_errors = context_config.get("exclude_error_messages", True)
+        exclude_questionable = context_config.get("exclude_questionable_messages", False)
+        
+        context_mgr = get_context_manager(session_id, max_history=max_history)
+        filtered_history = context_mgr.get_filtered_history(
+            exclude_errors=exclude_errors,
+            exclude_questionable=exclude_questionable
+        )
+        
+        logger.debug(f"获取到 {len(filtered_history)} 条过滤后的历史消息")
+        return filtered_history
+        
+    except Exception as e:
+        logger.error(f"获取过滤历史失败: {e}")
+        import traceback
+        traceback.print_exc()
+        return []
+
+
+def _add_to_history(
+    role: str, 
+    content: str, 
+    session_id: str = "default"
+):
+    """
+    添加消息到历史记录
+    
+    Args:
+        role: 角色（"user" 或 "assistant"）
+        content: 消息内容
+        session_id: 会话ID
+    """
+    cfg = load_config()
+    context_config = cfg.get("context_management", {})
+    
+    if not context_config.get("enabled", True):
+        return
+    
+    try:
+        from app.services.context_manager import get_context_manager
+        
+        max_history = context_config.get("max_history_rounds", 5)
+        context_mgr = get_context_manager(session_id, max_history=max_history)
+        context_mgr.add_message(role, content)
+        
+        logger.debug(f"已添加 {role} 消息到历史")
+    except Exception as e:
+        logger.error(f"添加到历史失败: {e}")
+        import traceback
+        traceback.print_exc()

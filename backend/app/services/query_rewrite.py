@@ -19,13 +19,14 @@ class QueryRewriteService:
     def __init__(self):
         self.cfg = load_config()
     
-    def rewrite_query(self, query: str, provider: str = None) -> str:
+    def rewrite_query(self, query: str, provider: str = None, use_summary_config: bool = False) -> str:
         """
         改写用户查询
         
         Args:
             query: 原始查询
             provider: LLM 提供商，默认使用配置中的
+            use_summary_config: 是否使用摘要检索配置而不是混合检索配置
             
         Returns:
             改写后的查询
@@ -33,9 +34,15 @@ class QueryRewriteService:
         cfg = load_config()
         provider = provider or cfg.get("provider", "openai")
         
-        # 检查是否启用查询改写
-        hybrid_config = cfg.get("hybrid_search", {})
-        if not hybrid_config.get("enable_query_rewrite", True):
+        # 检查是否启用查询改写（根据配置来源）
+        if use_summary_config:
+            summary_config = cfg.get("summary_search", {})
+            enabled = summary_config.get("enable_query_rewrite", True)
+        else:
+            hybrid_config = cfg.get("hybrid_search", {})
+            enabled = hybrid_config.get("enable_query_rewrite", True)
+        
+        if not enabled:
             logger.info("查询改写未启用，返回原始查询")
             return query
         
@@ -54,7 +61,7 @@ class QueryRewriteService:
 
         user_prompt = f"请改写以下查询，使其更适合检索系统：\n\n{query}"
         
-        logger.info(f"[DEBUG] 查询改写: provider={provider}, enable={hybrid_config.get('enable_query_rewrite', True)}")
+        logger.info(f"[DEBUG] 查询改写: provider={provider}, enable={enabled}")
         
         try:
             if provider == "ollama":

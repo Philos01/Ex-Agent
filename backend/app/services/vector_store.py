@@ -122,15 +122,31 @@ def add_documents(ids: List[str], documents: List[str], metadatas: List[dict], p
             logger.info(f"成功添加 {len(documents)} 个文档到向量库")
         except Exception as e:
             logger.error(f"Add documents error: {e}")
+            
+            # 检测 ChromaDB 索引损坏的各种错误
+            error_str = str(e).lower()
+            hnsw_errors = [
+                "hnsw", "compaction", "segment reader", "loading index",
+                "corrupt", "segment"
+            ]
+            
+            is_index_corrupted = any(err in error_str for err in hnsw_errors)
+            
+            if is_index_corrupted:
+                logger.warning("检测到向量库索引损坏，正在重置向量库...")
+                reset_collection()
+                collection = init_collection()
+                collection.add(**kwargs)
+                logger.info("已重置向量库并重新添加文档")
             # 如果是维度不匹配错误，重置集合并重新尝试
-            if "dimension" in str(e).lower():
+            elif "dimension" in error_str:
                 logger.warning("Dimension mismatch error, resetting collection...")
                 reset_collection()
                 collection = init_collection()
                 collection.add(**kwargs)
                 logger.info("已重置集合并重新添加文档")
             # 如果是集合不存在错误，重置集合并重新尝试
-            elif "Collection" in str(e) and "does not exist" in str(e):
+            elif "collection" in error_str and "does not exist" in error_str:
                 logger.warning("Collection not found, resetting collection...")
                 reset_collection()
                 collection = init_collection()
@@ -188,6 +204,63 @@ def search(query: str, top_k: int = 5, provider: str = None):
         return []
 
 
+def search_by_filenames(query: str, filenames: List[str], top_k: int = 5, provider: str = None):
+    """
+    在指定文件中搜索
+    
+    Args:
+        query: 查询文本
+        filenames: 文件名列表
+        top_k: 返回结果数量
+        provider: 已废弃，保留兼容性
+        
+    Returns:
+        搜索结果列表
+    """
+    collection = init_collection()
+    
+    try:
+        # 初始化嵌入服务
+        _init_embedding_service()
+        
+        logger.info(f"在 {len(filenames)} 个文件中检索: {filenames}")
+        
+        # 使用统一的嵌入服务
+        q_emb = EmbeddingService.embed_texts([query])
+        
+        if not q_emb or not q_emb[0]:
+            logger.warning("嵌入失败，使用文本查询")
+            res = collection.query(
+                query_texts=[query], 
+                n_results=top_k * 2,  # 获取更多结果用于过滤
+                include=["documents", "metadatas"]
+            )
+        else:
+            res = collection.query(
+                query_embeddings=q_emb, 
+                n_results=top_k * 2,  # 获取更多结果用于过滤
+                include=["documents", "metadatas", "distances"]
+            )
+        
+        docs = []
+        docs_list = res.get("documents", [[]])[0]
+        metas_list = res.get("metadatas", [[]])[0]
+        
+        # 只保留指定文件的结果
+        for d, m in zip(docs_list, metas_list):
+            if m and m.get("source") in filenames:
+                docs.append({"text": d, "metadata": m})
+                if len(docs) >= top_k:
+                    break
+        
+        logger.info(f"在指定文件中搜索完成，返回 {len(docs)} 个结果")
+        return docs
+        
+    except Exception as e:
+        logger.error(f"按文件名搜索错误: {e}")
+        return []
+
+
 def clear_all():
     """清空向量库"""
     global _collection
@@ -199,6 +272,42 @@ def clear_all():
     except Exception:
         pass
     _collection = client.get_or_create_collection("lab_docs")
+
+
+def delete_documents_by_filename(filename: str):
+    """
+    按文件名删除向量库中的文档
+    
+    Args:
+        filename: 文件名
+        
+    Returns:
+        删除的文档数量
+    """
+    try:
+        collection = init_collection()
+        
+        # 获取所有文档，查找匹配的文件名
+        all_docs = collection.get(include=["metadatas"])
+        
+        if not all_docs or not all_docs.get("ids"):
+            return 0
+        
+        # 找出所有匹配的文档 ID
+        ids_to_delete = []
+        for i, metadata in enumerate(all_docs.get("metadatas", [])):
+            if metadata and metadata.get("source") == filename:
+                ids_to_delete.append(all_docs["ids"][i])
+        
+        if ids_to_delete:
+            collection.delete(ids=ids_to_delete)
+            logger.info(f"已从向量库删除文件名 {filename} 的 {len(ids_to_delete)} 个文档")
+            return len(ids_to_delete)
+        
+        return 0
+    except Exception as e:
+        logger.error(f"按文件名删除文档失败: {e}")
+        return 0
 
 
 def get_collection_info():

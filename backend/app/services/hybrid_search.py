@@ -29,7 +29,8 @@ class HybridSearchService:
         final_count: int = None,
         bm25_weight: float = None,
         embedding_weight: float = None,
-        provider: str = None
+        provider: str = None,
+        skip_query_rewrite: bool = False
     ) -> List[Dict]:
         """
         执行混合检索
@@ -41,6 +42,7 @@ class HybridSearchService:
             bm25_weight: BM2.5 检索结果的权重
             embedding_weight: 向量检索结果的权重
             provider: LLM 提供商（用于查询改写）
+            skip_query_rewrite: 是否跳过查询改写（用于避免重复执行）
             
         Returns:
             检索结果列表
@@ -63,17 +65,21 @@ class HybridSearchService:
         
         logger.info(f"开始混合检索: query='{query}', initial_count={initial_count}, final_count={final_count}")
         
-        # 1. 查询改写
-        logger.info(f"[DEBUG] 开始查询改写，原始查询: '{query}', provider: {provider}")
-        query_rewrite_service = get_query_rewrite_service()
-        rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider)
-        
-        if rewritten_query != query:
-            logger.info(f"查询改写成功: '{query}' -> '{rewritten_query}'")
+        # 1. 查询改写（除非被明确跳过）
+        if not skip_query_rewrite:
+            logger.info(f"[DEBUG] 开始查询改写，原始查询: '{query}', provider: {provider}")
+            query_rewrite_service = get_query_rewrite_service()
+            rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider)
+            
+            if rewritten_query != query:
+                logger.info(f"查询改写成功: '{query}' -> '{rewritten_query}'")
+            else:
+                logger.info(f"使用原始查询: '{query}'")
+            
+            logger.info(f"[DEBUG] 最终用于检索的查询: '{rewritten_query}'")
         else:
-            logger.info(f"使用原始查询: '{query}'")
-        
-        logger.info(f"[DEBUG] 最终用于检索的查询: '{rewritten_query}'")
+            logger.info(f"[DEBUG] 跳过查询改写，直接使用传入的查询: '{query}'")
+            rewritten_query = query
         
         # 2. 并行检索 BM2.5 和 向量
         bm25_docs = self._search_bm25(rewritten_query, initial_count)
@@ -210,7 +216,8 @@ def hybrid_search(
     final_count: int = None,
     bm25_weight: float = None,
     embedding_weight: float = None,
-    provider: str = None
+    provider: str = None,
+    skip_query_rewrite: bool = False
 ) -> List[Dict]:
     """
     便捷函数：执行混合检索
@@ -222,6 +229,7 @@ def hybrid_search(
         bm25_weight: BM2.5 检索结果的权重
         embedding_weight: 向量检索结果的权重
         provider: LLM 提供商（用于查询改写）
+        skip_query_rewrite: 是否跳过查询改写（用于避免重复执行）
         
     Returns:
         检索结果列表
@@ -233,6 +241,7 @@ def hybrid_search(
         final_count=final_count,
         bm25_weight=bm25_weight,
         embedding_weight=embedding_weight,
-        provider=provider
+        provider=provider,
+        skip_query_rewrite=skip_query_rewrite
     )
 

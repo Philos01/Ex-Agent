@@ -78,6 +78,20 @@ DEFAULT_CONFIG: Dict = {
         "embedding_weight": 0.5,
         "rerank_model": "BAAI/bge-reranker-v2-m3",
         "enable_query_rewrite": True
+    },
+    "summary_search": {
+        "enabled": True,
+        "relevance_threshold": 0.6,
+        "summary_top_k": 5,
+        "content_top_k": 3,
+        "auto_generate_summary": True,
+        "enable_query_rewrite": True
+    },
+    "context_management": {
+        "enabled": True,
+        "max_history_rounds": 5,
+        "exclude_error_messages": True,
+        "exclude_questionable_messages": False
     }
 }
 

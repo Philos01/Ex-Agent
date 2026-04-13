@@ -1,0 +1,257 @@
+"""
+文件摘要生成服务
+使用大模型对文件内容进行分析和总结，生成结构化的文件摘要
+"""
+import logging
+import json
+from typing import Dict, Any, Optional
+from app.core.config import load_config
+from openai import OpenAI
+import requests
+
+logger = logging.getLogger(__name__)
+
+
+class DocumentSummary:
+    """文档摘要数据结构"""
+    
+    def __init__(self):
+        self.filename: str = ""
+        self.summary: str = ""
+        self.key_topics: list = []
+        self.key_points: list = []
+        self.main_conclusions: list = []
+        self.technical_terms: list = []
+        self.quality_score: float = 0.0
+        self.generated_at: str = ""
+        self.file_path: str = ""
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """转换为字典"""
+        return {
+            "filename": self.filename,
+            "summary": self.summary,
+            "key_topics": self.key_topics,
+            "key_points": self.key_points,
+            "main_conclusions": self.main_conclusions,
+            "technical_terms": self.technical_terms,
+            "quality_score": self.quality_score,
+            "generated_at": self.generated_at,
+            "file_path": self.file_path
+        }
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'DocumentSummary':
+        """从字典创建"""
+        summary = cls()
+        summary.filename = data.get("filename", "")
+        summary.summary = data.get("summary", "")
+        summary.key_topics = data.get("key_topics", [])
+        summary.key_points = data.get("key_points", [])
+        summary.main_conclusions = data.get("main_conclusions", [])
+        summary.technical_terms = data.get("technical_terms", [])
+        summary.quality_score = data.get("quality_score", 0.0)
+        summary.generated_at = data.get("generated_at", "")
+        summary.file_path = data.get("file_path", "")
+        return summary
+
+
+class DocumentSummarizer:
+    """文档摘要生成器"""
+    
+    def __init__(self):
+        self.cfg = load_config()
+    
+    def _get_openai_client(self):
+        """获取OpenAI客户端"""
+        key = self.cfg.get("openai_api_key")
+        base_url = self.cfg.get("openai_base_url")
+        
+        client_kwargs = {}
+        if key:
+            client_kwargs["api_key"] = key
+        if base_url:
+            client_kwargs["base_url"] = base_url
+        
+        return OpenAI(**client_kwargs)
+    
+    def generate_summary(self, file_text: str, filename: str, provider: str = "openai") -> DocumentSummary:
+        """
+        生成文档摘要
+        
+        Args:
+            file_text: 文件完整文本
+            filename: 文件名
+            provider: LLM提供商
+            
+        Returns:
+            DocumentSummary对象
+        """
+        import datetime
+        
+        logger.info(f"开始生成文档摘要: {filename}")
+        
+        # 构建提示词
+        system_prompt = """你是一个专业的文档分析专家，专门用于分析和总结知识库中的文档。
+
+你的任务是分析提供的文档内容，生成结构化的摘要，遵循以下要求：
+
+1. 保持学术严谨性和准确性
+2. 提取文档的核心主题
+3. 列出关键要点（3-5条）
+4. 总结主要结论（2-3条）
+5. 提取文档中出现的重要技术术语
+6. 所有内容必须基于提供的文档，不要添加外部知识
+
+请以JSON格式输出，包含以下字段：
+{
+  "summary": "文档的简要总结（100-200字）",
+  "key_topics": ["核心主题1", "核心主题2"],
+  "key_points": ["关键要点1", "关键要点2", "关键要点3"],
+  "main_conclusions": ["主要结论1", "主要结论2"],
+  "technical_terms": ["术语1", "术语2"],
+  "quality_score": 0.9
+}
+
+其中 quality_score 是你对文档摘要质量的评分（0.0-1.0），基于：
+- 摘要的准确性
+- 信息的完整性
+- 结构的清晰度
+"""
+
+        # 限制文本长度，避免token超限
+        max_text_length = 15000
+        if len(file_text) > max_text_length:
+            file_text = file_text[:max_text_length]
+            logger.warning(f"文档文本过长，已截断为 {max_text_length} 字符")
+        
+        user_prompt = f"请分析以下文档内容，生成结构化摘要：\n\n文件名：{filename}\n\n文档内容：\n{file_text}"
+        
+        try:
+            if provider == "ollama":
+                result = self._generate_with_ollama(system_prompt, user_prompt)
+            else:
+                result = self._generate_with_openai(system_prompt, user_prompt)
+            
+            # 解析结果
+            doc_summary = DocumentSummary()
+            doc_summary.filename = filename
+            doc_summary.generated_at = datetime.datetime.utcnow().isoformat()
+            
+            if result:
+                try:
+                    data = json.loads(result)
+                    doc_summary.summary = data.get("summary", "")
+                    doc_summary.key_topics = data.get("key_topics", [])
+                    doc_summary.key_points = data.get("key_points", [])
+                    doc_summary.main_conclusions = data.get("main_conclusions", [])
+                    doc_summary.technical_terms = data.get("technical_terms", [])
+                    doc_summary.quality_score = data.get("quality_score", 0.5)
+                except json.JSONDecodeError as e:
+                    logger.error(f"解析JSON失败: {e}")
+                    # 如果JSON解析失败，尝试提取文本
+                    doc_summary.summary = result
+            
+            logger.info(f"文档摘要生成成功: {filename}")
+            return doc_summary
+            
+        except Exception as e:
+            logger.error(f"生成文档摘要失败: {e}")
+            import traceback
+            traceback.print_exc()
+            # 返回一个简单的摘要
+            doc_summary = DocumentSummary()
+            doc_summary.filename = filename
+            doc_summary.summary = f"文档：{filename}"
+            doc_summary.generated_at = datetime.datetime.utcnow().isoformat()
+            return doc_summary
+    
+    def _generate_with_openai(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """使用OpenAI生成摘要"""
+        try:
+            client = self._get_openai_client()
+            model_name = self.cfg.get("openai_chat_model", "gpt-3.5-turbo")
+            
+            completion = client.chat.completions.create(
+                model=model_name,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                max_tokens=2000,
+                temperature=0.3,
+            )
+            
+            if (
+                completion.choices 
+                and len(completion.choices) > 0 
+                and completion.choices[0].message 
+                and completion.choices[0].message.content
+            ):
+                return completion.choices[0].message.content.strip()
+            return None
+        except Exception as e:
+            logger.error(f"OpenAI 摘要生成失败: {e}")
+            return None
+    
+    def _generate_with_ollama(self, system_prompt: str, user_prompt: str) -> Optional[str]:
+        """使用Ollama生成摘要"""
+        try:
+            endpoint = self.cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/generate"
+            model_name = self.cfg.get("ollama_model", "llama2")
+            
+            prompt = f"{system_prompt}\n\n{user_prompt}"
+            
+            r = requests.post(
+                endpoint,
+                json={
+                    "model": model_name,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {
+                        "temperature": 0.3,
+                        "num_predict": 2000
+                    }
+                },
+                timeout=300
+            )
+            r.raise_for_status()
+            
+            result = r.json().get("response", "")
+            return result.strip() if result else None
+        except Exception as e:
+            logger.error(f"Ollama 摘要生成失败: {e}")
+            return None
+
+
+# 全局摘要生成器实例
+_summarizer = None
+
+
+def get_document_summarizer() -> DocumentSummarizer:
+    """
+    获取或创建全局文档摘要生成器实例
+    
+    Returns:
+        DocumentSummarizer 实例
+    """
+    global _summarizer
+    if _summarizer is None:
+        _summarizer = DocumentSummarizer()
+    return _summarizer
+
+
+def generate_document_summary(file_text: str, filename: str, provider: str = "openai") -> DocumentSummary:
+    """
+    便捷函数：生成文档摘要
+    
+    Args:
+        file_text: 文件完整文本
+        filename: 文件名
+        provider: LLM提供商
+        
+    Returns:
+        DocumentSummary对象
+    """
+    summarizer = get_document_summarizer()
+    return summarizer.generate_summary(file_text, filename, provider)

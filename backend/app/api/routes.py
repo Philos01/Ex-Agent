@@ -46,6 +46,10 @@ async def upload_files(files: List[UploadFile] = File(...)):
     for f in files:
         file_ext = os.path.splitext(f.filename)[1].lower()
         temp_path = None
+        processed_filename = None
+        final_file_path = None
+        added_to_metadata = False
+        added_to_vector_store = False
         
         try:
             # 检查文件类型
@@ -54,8 +58,36 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 if file_ext == ".pdf" and not cfg.get("allow_pdf_conversion", False):
                     print(f"[DEBUG] PDF 转换功能未启用，直接上传 PDF 文件: {f.filename}")
                     dest = await save_upload(f)
-                    ingest_file(dest, provider=cfg.get("provider", "openai"))
-                    saved.append(os.path.basename(dest))
+                    processed_filename = os.path.basename(dest)
+                    final_file_path = dest
+                    
+                    # 先添加到 metadata
+                    file_size = os.path.getsize(dest)
+                    metas = []
+                    try:
+                        metas = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+                    except Exception:
+                        pass
+                    # 过滤掉已存在的同名文件记录
+                    metas = [m for m in metas if m.get("filename") != processed_filename]
+                    metas.append({
+                        "filename": processed_filename,
+                        "upload_time": datetime.datetime.utcnow().isoformat(),
+                        "size": file_size,
+                        "doc_type": file_ext,
+                    })
+                    METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
+                    added_to_metadata = True
+                    
+                    # 处理文件到知识库
+                    ingest_result = ingest_file(dest, provider=cfg.get("provider", "openai"))
+                    added_to_vector_store = ingest_result.get("success", False)
+                    
+                    saved.append({
+                        "filename": processed_filename,
+                        "chunks_count": ingest_result.get("chunks_count", 0),
+                        "summary_generated": ingest_result.get("summary_generated", False)
+                    })
                     print(f"[DEBUG] PDF 文件 {f.filename} 直接上传成功")
                     continue
                 
@@ -114,8 +146,10 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     final_md_name = f"{base_name}.md"
                     final_md_path = os.path.join(str(UPLOAD_DIR), final_md_name)
                     shutil.move(md_file, final_md_path)
+                    processed_filename = final_md_name
+                    final_file_path = final_md_path
                     
-                    # 5. 更新元数据
+                    # 5. 更新元数据 - 先删除临时文件，再添加正式文件
                     delete_uploaded_file(os.path.basename(temp_path))
                     if os.path.exists(temp_path):
                         os.remove(temp_path)
@@ -135,10 +169,17 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         "doc_type": ".md",
                     })
                     METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
+                    added_to_metadata = True
                     
                     # 6. 加入知识库
-                    ingest_file(final_md_path, provider=cfg.get("provider", "openai"))
-                    saved.append(final_md_name)
+                    ingest_result = ingest_file(final_md_path, provider=cfg.get("provider", "openai"))
+                    added_to_vector_store = ingest_result.get("success", False)
+                    
+                    saved.append({
+                        "filename": final_md_name,
+                        "chunks_count": ingest_result.get("chunks_count", 0),
+                        "summary_generated": ingest_result.get("summary_generated", False)
+                    })
                     print(f"[DEBUG] 文件 {f.filename} 处理成功")
                     
                     # 清理临时目录
@@ -159,25 +200,105 @@ async def upload_files(files: List[UploadFile] = File(...)):
             # 处理其他文件类型
             else:
                 dest = await save_upload(f)
-                ingest_file(dest, provider=cfg.get("provider", "openai"))
-                saved.append(os.path.basename(dest))
+                processed_filename = os.path.basename(dest)
+                final_file_path = dest
+                
+                # 添加到 metadata
+                file_size = os.path.getsize(dest)
+                metas = []
+                try:
+                    metas = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+                # 过滤掉已存在的同名文件记录
+                metas = [m for m in metas if m.get("filename") != processed_filename]
+                metas.append({
+                    "filename": processed_filename,
+                    "upload_time": datetime.datetime.utcnow().isoformat(),
+                    "size": file_size,
+                    "doc_type": file_ext,
+                })
+                METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
+                added_to_metadata = True
+                
+                # 处理文件到知识库
+                ingest_result = ingest_file(dest, provider=cfg.get("provider", "openai"))
+                added_to_vector_store = ingest_result.get("success", False)
+                
+                saved.append({
+                    "filename": processed_filename,
+                    "chunks_count": ingest_result.get("chunks_count", 0),
+                    "summary_generated": ingest_result.get("summary_generated", False)
+                })
                 print(f"[DEBUG] 文件 {f.filename} 处理成功")
         
         except Exception as e:
             print(f"[ERROR] 文件 {f.filename} 处理失败: {e}")
             import traceback
             traceback.print_exc()
+            
+            # 完整回滚
+            try:
+                # 1. 从向量库删除已添加的文档
+                if added_to_vector_store and processed_filename:
+                    try:
+                        from app.services.vector_store import delete_documents_by_filename
+                        deleted_count = delete_documents_by_filename(processed_filename)
+                        print(f"[DEBUG] 已回滚，从向量库删除 {deleted_count} 个文档")
+                    except Exception as rollback_error:
+                        print(f"[ERROR] 回滚向量库失败: {rollback_error}")
+                
+                # 2. 删除对应的摘要
+                if processed_filename:
+                    try:
+                        from app.services.summary_store import delete_document_summary
+                        delete_document_summary(processed_filename)
+                        print(f"[DEBUG] 已删除文档摘要: {processed_filename}")
+                    except Exception as rollback_error:
+                        print(f"[ERROR] 删除摘要失败: {rollback_error}")
+                
+                # 3. 从 metadata 中删除
+                if added_to_metadata and processed_filename:
+                    try:
+                        metas = []
+                        try:
+                            metas = json.loads(METADATA_PATH.read_text(encoding="utf-8"))
+                        except Exception:
+                            pass
+                        # 过滤掉该文件的记录
+                        metas = [m for m in metas if m.get("filename") != processed_filename]
+                        METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
+                        print(f"[DEBUG] 已从 metadata 删除: {processed_filename}")
+                    except Exception as rollback_error:
+                        print(f"[ERROR] 回滚 metadata 失败: {rollback_error}")
+                
+                # 4. 删除文件
+                if final_file_path and os.path.exists(final_file_path):
+                    try:
+                        delete_uploaded_file(processed_filename)
+                        os.remove(final_file_path)
+                        print(f"[DEBUG] 已删除文件: {final_file_path}")
+                    except Exception as rollback_error:
+                        print(f"[ERROR] 删除文件失败: {rollback_error}")
+                
+                # 5. 清理临时文件
+                if temp_path and os.path.exists(temp_path):
+                    try:
+                        delete_uploaded_file(os.path.basename(temp_path))
+                        os.remove(temp_path)
+                    except:
+                        pass
+                        
+            except Exception as full_rollback_error:
+                print(f"[ERROR] 完整回滚过程出错: {full_rollback_error}")
+                import traceback
+                traceback.print_exc()
+            
             failed.append({
                 "filename": f.filename,
                 "reason": str(e)
             })
-            # 清理临时文件
-            try:
-                if temp_path and os.path.exists(temp_path):
-                    delete_uploaded_file(os.path.basename(temp_path))
-                    os.remove(temp_path)
-            except:
-                pass
+            
             # 继续处理下一个文件，不中断整个流程
             continue
     
@@ -206,6 +327,23 @@ def delete_document(filename: str = None, file: str = None):
         raise HTTPException(status_code=400, detail="请提供文件名")
     
     print(f"[DEBUG] 删除文档: {target_filename}")
+    
+    # 从向量库删除对应的文档 chunks
+    try:
+        from app.services.vector_store import delete_documents_by_filename
+        deleted_count = delete_documents_by_filename(target_filename)
+        print(f"[DEBUG] 已从向量库删除 {deleted_count} 个文档片段")
+    except Exception as e:
+        print(f"[DEBUG] 从向量库删除文档失败: {e}")
+    
+    # 删除对应的摘要
+    try:
+        from app.services.summary_store import delete_document_summary
+        delete_document_summary(target_filename)
+        print(f"[DEBUG] 已删除文档摘要: {target_filename}")
+    except Exception as e:
+        print(f"[DEBUG] 删除文档摘要失败: {e}")
+    
     delete_uploaded_file(target_filename)
     return {"status": "deleted", "file": target_filename}
 
@@ -263,8 +401,8 @@ async def qa_endpoint(req: QARequest):
     print(f"[DEBUG]   frequency_penalty: {req.frequency_penalty}")
     print(f"[DEBUG]   messages history: {len(req.messages)} messages")
     
-    from app.services.vector_store import search
-    docs = search(req.question, top_k=req.top_k, provider=provider)
+    from app.services.qa import _retrieve_documents
+    docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
     sources = [d.get("metadata", {}) for d in docs]
     
     # 收集生成参数
@@ -473,3 +611,110 @@ def set_local_embedding_model(req: EmbeddingModelRequest):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"设置本地模型失败: {str(e)}")
+
+
+# 文档摘要管理 API
+@router.get("/summaries")
+def list_summaries():
+    """列出所有文档摘要"""
+    try:
+        from app.services.summary_store import get_summary_store
+        store = get_summary_store()
+        summaries = store.get_all_summaries()
+        
+        summary_list = []
+        for summary in summaries:
+            summary_list.append({
+                "filename": summary.filename,
+                "summary": summary.summary,
+                "key_topics": summary.key_topics,
+                "quality_score": summary.quality_score,
+                "generated_at": summary.generated_at
+            })
+        
+        return {"status": "ok", "summaries": summary_list}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取摘要列表失败: {str(e)}")
+
+
+@router.get("/summaries/{filename:path}")
+def get_summary(filename: str):
+    """获取指定文档的摘要"""
+    try:
+        from app.services.summary_store import get_document_summary
+        summary = get_document_summary(filename)
+        
+        if not summary:
+            raise HTTPException(status_code=404, detail="摘要不存在")
+        
+        return {"status": "ok", "summary": summary.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取摘要失败: {str(e)}")
+
+
+@router.post("/summaries/{filename:path}/regenerate")
+def regenerate_summary(filename: str, provider: str = None):
+    """重新生成文档摘要"""
+    try:
+        from app.core.config import UPLOAD_DIR
+        from app.services.ingest import extract_text, generate_and_save_summary
+        from app.services.summary_store import get_document_summary
+        
+        cfg = load_config()
+        if provider is None:
+            provider = cfg.get("provider", "openai")
+        
+        file_path = UPLOAD_DIR / filename
+        if not file_path.exists():
+            raise HTTPException(status_code=404, detail="文件不存在")
+        
+        # 提取文本并重新生成摘要
+        file_text = extract_text(str(file_path))
+        success = generate_and_save_summary(str(file_path), filename, file_text, provider)
+        
+        if not success:
+            raise HTTPException(status_code=500, detail="摘要生成失败")
+        
+        # 获取新生成的摘要
+        summary = get_document_summary(filename)
+        return {"status": "ok", "message": "摘要重新生成成功", "summary": summary.to_dict()}
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"重新生成摘要失败: {str(e)}")
+
+
+# 上下文管理 API
+@router.get("/context/{session_id}")
+def get_context_history(session_id: str = "default"):
+    """获取会话的上下文历史"""
+    try:
+        from app.services.context_manager import get_context_manager
+        from app.core.config import load_config
+        
+        cfg = load_config()
+        context_config = cfg.get("context_management", {})
+        max_history = context_config.get("max_history_rounds", 5)
+        
+        context_mgr = get_context_manager(session_id, max_history=max_history)
+        history = context_mgr.get_filtered_history(exclude_errors=False, exclude_questionable=False)
+        stats = context_mgr.get_history_stats()
+        
+        return {"status": "ok", "history": history, "stats": stats}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"获取上下文历史失败: {str(e)}")
+
+
+@router.delete("/context/{session_id}")
+def clear_context_history(session_id: str = "default"):
+    """清除会话的上下文历史"""
+    try:
+        from app.services.context_manager import clear_context_manager
+        clear_context_manager(session_id)
+        return {"status": "ok", "message": f"会话 {session_id} 的上下文历史已清除"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"清除上下文历史失败: {str(e)}")

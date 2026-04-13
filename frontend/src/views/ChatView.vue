@@ -44,7 +44,7 @@
               <span class="text-xs text-outline">·</span>
               <span class="text-sm font-semibold text-on-surface-variant">用户</span>
             </div>
-            <div class="max-w-[90%] md:max-w-2xl bg-primary-container text-on-primary-container px-4 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-none shadow-sm">
+            <div class="max-w-[90%] md:max-w-2xl bg-primary-container text-white px-4 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-none shadow-sm">
               <p class="whitespace-pre-wrap text-sm md:text-base">{{ m.text }}</p>
             </div>
           </div>
@@ -79,7 +79,7 @@
                   </div>
                   <span class="text-on-surface-variant text-sm">正在生成...</span>
                 </div>
-                <div v-else-if="m.text" v-html="m.text" class="whitespace-pre-wrap"></div>
+                <div v-else-if="m.text" v-html="renderMarkdown(m.text)" class="markdown-content"></div>
               </div>
 
               <!-- 动态组件渲染 -->
@@ -357,6 +357,7 @@ import ThinkingSteps from '../components/gen-ui/ThinkingSteps.vue'
 import CitationHoverCard from '../components/gen-ui/CitationHoverCard.vue'
 import DocumentPreviewPanel from '../components/gen-ui/DocumentPreviewPanel.vue'
 import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
+import { marked } from 'marked'
 
 const store = useAppStore()
 const route = useRoute()
@@ -429,6 +430,15 @@ const documentPreview = ref({
 })
 
 const isMobile = computed(() => windowWidth.value < 768)
+
+// 计算属性：将Markdown转换为HTML
+const renderMarkdown = (text) => {
+  if (!text) return ''
+  return marked(text, {
+    breaks: true,
+    gfm: true
+  })
+}
 
 const handleResize = () => {
   windowWidth.value = window.innerWidth
@@ -884,5 +894,186 @@ async function saveMessageToDatabase(role, content, sources) {
 .slide-in-right-enter-active + div,
 .slide-in-right-leave-active + div {
   transition: opacity 0.3s ease;
+}
+
+/* Markdown 内容样式 */
+:deep(.markdown-content) {
+  line-height: 1.8;
+}
+
+:deep(.markdown-content h1) {
+  font-size: 1.875rem;
+  font-weight: 800;
+  color: #1f2937;
+  margin-top: 1.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 2px solid #e5e7eb;
+}
+
+:deep(.markdown-content h2) {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: #374151;
+  margin-top: 1.25rem;
+  margin-bottom: 0.75rem;
+  padding-bottom: 0.375rem;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+:deep(.markdown-content h3) {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #4b5563;
+  margin-top: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+:deep(.markdown-content h4),
+:deep(.markdown-content h5),
+:deep(.markdown-content h6) {
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: #6b7280;
+  margin-top: 0.875rem;
+  margin-bottom: 0.375rem;
+}
+
+:deep(.markdown-content p) {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  color: #374151;
+}
+
+:deep(.markdown-content strong) {
+  font-weight: 700;
+  color: #111827;
+}
+
+:deep(.markdown-content em) {
+  font-style: italic;
+  color: #4b5563;
+}
+
+:deep(.markdown-content ul),
+:deep(.markdown-content ol) {
+  margin-top: 0.5rem;
+  margin-bottom: 0.5rem;
+  padding-left: 1.5rem;
+}
+
+:deep(.markdown-content ul) {
+  list-style-type: disc;
+}
+
+:deep(.markdown-content ol) {
+  list-style-type: decimal;
+}
+
+:deep(.markdown-content li) {
+  margin-top: 0.25rem;
+  margin-bottom: 0.25rem;
+  color: #374151;
+}
+
+:deep(.markdown-content ul li::marker),
+:deep(.markdown-content ol li::marker) {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+:deep(.markdown-content code) {
+  background-color: #f3f4f6;
+  color: #dc2626;
+  padding: 0.125rem 0.375rem;
+  border-radius: 0.375rem;
+  font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+  font-size: 0.875rem;
+}
+
+:deep(.markdown-content pre) {
+  background-color: #1f2937;
+  color: #e5e7eb;
+  padding: 1rem;
+  border-radius: 0.5rem;
+  overflow-x: auto;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+:deep(.markdown-content pre code) {
+  background-color: transparent;
+  color: inherit;
+  padding: 0;
+  font-size: 0.875rem;
+  line-height: 1.6;
+}
+
+:deep(.markdown-content blockquote) {
+  border-left: 4px solid #3b82f6;
+  padding-left: 1rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+  color: #6b7280;
+  font-style: italic;
+  background-color: #eff6ff;
+  padding-top: 0.5rem;
+  padding-bottom: 0.5rem;
+  padding-right: 0.75rem;
+  border-radius: 0 0.375rem 0.375rem 0;
+}
+
+:deep(.markdown-content a) {
+  color: #3b82f6;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+:deep(.markdown-content a:hover) {
+  color: #1d4ed8;
+}
+
+:deep(.markdown-content table) {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+:deep(.markdown-content th),
+:deep(.markdown-content td) {
+  border: 1px solid #e5e7eb;
+  padding: 0.5rem 0.75rem;
+  text-align: left;
+}
+
+:deep(.markdown-content th) {
+  background-color: #f9fafb;
+  font-weight: 600;
+  color: #374151;
+}
+
+:deep(.markdown-content tr:nth-child(even)) {
+  background-color: #f9fafb;
+}
+
+:deep(.markdown-content tr:hover) {
+  background-color: #f3f4f6;
+}
+
+:deep(.markdown-content hr) {
+  border: none;
+  height: 1px;
+  background-color: #e5e7eb;
+  margin-top: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+:deep(.markdown-content img) {
+  max-width: 100%;
+  height: auto;
+  border-radius: 0.5rem;
+  margin-top: 0.75rem;
+  margin-bottom: 0.75rem;
 }
 </style>

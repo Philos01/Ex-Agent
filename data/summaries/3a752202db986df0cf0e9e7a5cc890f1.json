@@ -1,0 +1,37 @@
+{
+  "filename": "Bidirectional Spectral Attention Multi-Scale Aggregation Network for Spectral Super-Resolution(1).pdf",
+  "summary": "本文提出了一种用于光谱超分辨率（SSR）的新型深度学习网络——双向光谱注意力多尺度聚合网络（BiSANet）。该网络通过三个U型结构分支和两种先进的注意力机制，实现了光谱与空间信息的高效提取与融合。特别地，BiSANet引入了双向光谱注意力建模，借鉴视频超分辨率中的双向帧信息利用方法，增强了光谱特征的表达能力。同时，设计了独立的RGB图像重建分支以保证空间信息的准确提取，并通过多尺度、多层次的特征交互实现光谱与空间信息的深度融合。大量公开数据集上的实验证明，BiSANet在定性和定量指标上均优于现有最先进的SSR方法。",
+  "key_topics": [
+    "光谱超分辨率（SSR）",
+    "双向光谱注意力机制",
+    "多尺度特征聚合",
+    "深度学习与注意力机制",
+    "光谱与空间信息融合"
+  ],
+  "key_points": [
+    "现有SSR方法多侧重光谱信息，忽视空间特征，导致重建图像空间细节模糊。",
+    "BiSANet采用三个U-Net结构分支，分别负责光谱和空间信息的提取与融合。",
+    "引入双向光谱注意力机制，通过正序和逆序光谱特征提取实现光谱信息的互补。",
+    "设计独立的RGB图像重建分支，利用多级空间信息动态增强光谱分支的空间感知能力。",
+    "重建模块结合Vision Mamba和CBAM注意力机制，实现光谱与空间特征的自适应融合。"
+  ],
+  "main_conclusions": [
+    "BiSANet有效解决了SSR中光谱与空间信息提取不平衡及交互不足的问题，提升了重建HSI的质量。",
+    "双向光谱注意力和多尺度空间信息融合显著增强了模型对复杂光谱空间关系的建模能力。",
+    "在多个公开基准数据集上的实验结果表明，BiSANet在光谱超分辨率任务中优于现有最先进方法。"
+  ],
+  "technical_terms": [
+    "光谱超分辨率（SSR）",
+    "双向光谱注意力（Bidirectional Spectral Attention）",
+    "多尺度聚合（Multi-Scale Aggregation）",
+    "U-Net结构",
+    "多头自注意力机制（Multi-head Self-Attention）",
+    "Vision Mamba",
+    "CBAM（Convolutional Block Attention Module）",
+    "RGB图像重建分支",
+    "Spectral-Spatial Fusion and Interaction Module (SSFIM)"
+  ],
+  "quality_score": 0.95,
+  "generated_at": "2026-04-12T08:45:42.332406",
+  "file_path": "C:\\Users\\24117\\Desktop\\troublesome\\Agent\\实验室Agent\\data\\uploads\\Bidirectional Spectral Attention Multi-Scale Aggregation Network for Spectral Super-Resolution(1).pdf"
+}

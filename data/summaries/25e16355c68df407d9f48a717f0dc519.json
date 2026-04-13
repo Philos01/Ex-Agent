@@ -1,0 +1,38 @@
+{
+  "filename": "IM-CMDet_An_Intramodal_Enhancement_and_Cross-Modal_Fusion_Network_for_Small_Object_Detection_in_UAV_Aerial_Visible-Infrared_Imagery.pdf",
+  "summary": "本文提出了一种针对无人机(UAV)航拍可见光-红外(RGBT)图像中小目标检测的网络——IM-CMDet。该网络通过细节-语义联合增强模块(DSJE)、基于差分的融合权重生成模块(DFWG)和特征重建网络(FRN)三大模块，有效解决了高空拍摄导致的小目标像素稀少及跨模态空间错位问题。DSJE模块优化多层特征表示以防止小目标信息被背景噪声淹没，FRN利用Swin-Transformer架构建立模态间信息关联，DFWG结合差分与空间注意力机制生成融合权重，提升对小目标的敏感度。大量实验验证了IM-CMDet在复杂航拍场景下的优越性能，显著推动了小目标检测技术的发展。",
+  "key_topics": [
+    "无人机航拍小目标检测",
+    "可见光-红外跨模态融合",
+    "细节与语义增强",
+    "空间错位与融合权重生成",
+    "Swin-Transformer特征重建"
+  ],
+  "key_points": [
+    "无人机高空拍摄导致小目标像素极少，增加检测难度。",
+    "单一模态（可见光或红外）存在光照、天气等限制，跨模态融合可利用两者互补优势。",
+    "传统静态融合方法忽视模态间空间错位，影响检测性能。",
+    "IM-CMDet设计了DSJE、DFWG和FRN模块，分别解决小目标特征弱化、融合权重自适应生成及模态差异重建问题。",
+    "实验在多个数据集上验证了IM-CMDet的先进性，提升了复杂环境下小目标检测的准确率和鲁棒性。"
+  ],
+  "main_conclusions": [
+    "IM-CMDet通过联合细节与语义增强及基于差分的自适应融合权重生成，有效提升了无人机航拍可见光-红外图像中小目标的检测性能。",
+    "利用Swin-Transformer架构的特征重建网络成功缓解了跨模态空间错位问题，增强了模态间信息的相关性。",
+    "该方法在多个公开基准数据集上实现了最先进的检测效果，证明了其在复杂航拍场景下的实用价值和推广潜力。"
+  ],
+  "technical_terms": [
+    "无人机(UAV)",
+    "可见光-红外(RGBT)图像",
+    "小目标检测",
+    "跨模态融合",
+    "细节-语义联合增强(DSJE)",
+    "差分融合权重生成(DFWG)",
+    "特征重建网络(FRN)",
+    "Swin-Transformer",
+    "空间注意力机制",
+    "多模态特征融合"
+  ],
+  "quality_score": 0.95,
+  "generated_at": "2026-04-12T08:17:17.813691",
+  "file_path": "C:\\Users\\24117\\Desktop\\troublesome\\Agent\\实验室Agent\\data\\uploads\\IM-CMDet_An_Intramodal_Enhancement_and_Cross-Modal_Fusion_Network_for_Small_Object_Detection_in_UAV_Aerial_Visible-Infrared_Imagery.pdf"
+}

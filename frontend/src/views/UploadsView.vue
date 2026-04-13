@@ -6,7 +6,7 @@
     </div>
 
     <!-- 统计卡片 -->
-    <div class="grid gap-4 md:gap-6 grid-cols-1 md:grid-cols-2">
+    <div class="grid gap-4 md:gap-6 grid-cols-2">
       <div class="bg-surface rounded-xl md:rounded-2xl p-4 md:p-6 shadow-sm border border-outline-variant/10">
         <div class="flex items-start justify-between">
           <div>
@@ -119,7 +119,12 @@
               <td class="p-3 md:p-4">
                 <div class="flex items-center gap-2 md:gap-3">
                   <span class="material-symbols-outlined text-xl md:text-2xl text-primary">description</span>
-                  <span class="font-medium text-on-surface text-sm md:text-base">{{ doc.filename }}</span>
+                  <span 
+                    class="font-medium text-on-surface text-sm md:text-base truncate max-w-[200px] md:max-w-[300px]"
+                    :title="doc.filename"
+                  >
+                    {{ truncateFilename(doc.filename) }}
+                  </span>
                 </div>
               </td>
               <td class="p-3 md:p-4 text-right text-on-surface-variant text-sm">{{ formatFileSize(doc.size) }} MB</td>
@@ -187,6 +192,36 @@ const formatFileSize = (bytes) => {
   if (!bytes) return '0'
   const sizeInMB = parseFloat(bytes) / (1024 * 1024)
   return sizeInMB.toFixed(2)
+}
+
+const truncateFilename = (filename, maxLength = 30) => {
+  if (!filename || filename.length <= maxLength) {
+    return filename
+  }
+  
+  // 获取文件扩展名
+  const lastDotIndex = filename.lastIndexOf('.')
+  if (lastDotIndex === -1) {
+    // 没有扩展名，直接截断中间
+    const half = Math.floor((maxLength - 3) / 2)
+    return filename.substring(0, half) + '...' + filename.substring(filename.length - half)
+  }
+  
+  // 有扩展名的情况
+  const ext = filename.substring(lastDotIndex)
+  const nameWithoutExt = filename.substring(0, lastDotIndex)
+  const maxNameLength = maxLength - ext.length - 3
+  
+  if (maxNameLength <= 0) {
+    return '...' + ext
+  }
+  
+  if (nameWithoutExt.length <= maxNameLength) {
+    return filename
+  }
+  
+  // 截断文件名部分，保留扩展名
+  return nameWithoutExt.substring(0, maxNameLength) + '...' + ext
 }
 
 const loadList = async () => {
