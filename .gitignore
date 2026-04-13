@@ -10,3 +10,9 @@ backend/config.json
 
 # Node
 node_modules/
+
+# 忽略所有数据库文件
+*.db
+*.sqlite3
+data/*.db
+data/**/*.sqlite3
