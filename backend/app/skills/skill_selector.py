@@ -4,6 +4,7 @@ Skill Selector - Select skills using LLM based on YAML frontmatter
 """
 import logging
 import json
+import requests
 from pathlib import Path
 from app.core.config import load_config
 from app.skills.metadata_parser import get_skill_metadata
@@ -59,12 +60,60 @@ class SkillSelector:
         
         return OpenAI(**client_kwargs)
     
-    def select_skill_with_llm(self, question):
+    def _call_ollama(self, prompt):
+        """调用Ollama模型（非流式）"""
+        try:
+            endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
+            model_name = self.cfg.get("ollama_model")
+            logger.info(f"[SkillSelector-By-LLM] Calling Ollama with model: {model_name}")
+            
+            # 设置 stream=False 确保返回单个 JSON 对象而不是流式响应
+            r = requests.post(endpoint, json={"model": model_name, "prompt": prompt, "stream": False}, timeout=60)
+            r.raise_for_status()
+            return r.json().get("response", "")
+        except Exception as e:
+            logger.error(f"[SkillSelector-By-LLM] Ollama call failed: {str(e)}")
+            raise
+    
+    def _call_openai(self, prompt):
+        """调用OpenAI模型"""
+        client = self._get_openai_client()
+        model_name = self.cfg.get("openai_chat_model", "gpt-3.5-turbo")
+        
+        logger.info(f"[SkillSelector-By-LLM] Calling OpenAI with model: {model_name}")
+        
+        completion = client.chat.completions.create(
+            model=model_name,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a skill selector that outputs only JSON."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                }
+            ],
+            max_tokens=512,
+            temperature=0.1,
+        )
+        
+        if (
+            completion.choices 
+            and len(completion.choices) > 0 
+            and completion.choices[0].message 
+            and completion.choices[0].message.content
+        ):
+            return completion.choices[0].message.content.strip()
+        return ""
+    
+    def select_skill_with_llm(self, question, provider="openai"):
         """
         Select skill using LLM
         
         Args:
             question: User question
+            provider: LLM provider ("openai" or "ollama")
             
         Returns:
             (should_use, skill_name, skill_params)
@@ -119,57 +168,38 @@ You are a skill selector for an AI assistant. Your task is to analyze the user's
 - Extract parameters directly from the question
 - If no skill matches, set "should_use_skill" to false and "skill_name" to null
 - Be conservative - only use skills when they are clearly relevant
+- Output only the JSON, no other text
 """
         
         try:
-            client = self._get_openai_client()
-            model_name = self.cfg.get("openai_chat_model", "gpt-3.5-turbo")
+            # 根据provider选择调用方式
+            if provider == "ollama":
+                response_text = self._call_ollama(prompt)
+            else:
+                response_text = self._call_openai(prompt)
+            print(f"[SkillSelector-By-LLM] Using provider: {provider}")
+            if not response_text:
+                logger.warning("[SkillSelector-By-LLM] Empty LLM response")
+                return False, None, None
             
-            logger.info(f"[SkillSelector-By-LLM] Calling LLM with model: {model_name}")
-            
-            completion = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": "You are a skill selector that outputs only JSON."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ],
-                max_tokens=512,
-                temperature=0.1,
-            )
-            
-            # Parse response
-            if (
-                completion.choices 
-                and len(completion.choices) > 0 
-                and completion.choices[0].message 
-                and completion.choices[0].message.content
-            ):
-                response_text = completion.choices[0].message.content.strip()
+            # Extract JSON from response (in case of extra text)
+            json_start = response_text.find('{')
+            json_end = response_text.rfind('}')
+            if json_start != -1 and json_end != -1:
+                json_str = response_text[json_start:json_end + 1]
+                result = json.loads(json_str)
                 
-                # Extract JSON from response (in case of extra text)
-                json_start = response_text.find('{')
-                json_end = response_text.rfind('}')
-                if json_start != -1 and json_end != -1:
-                    json_str = response_text[json_start:json_end + 1]
-                    result = json.loads(json_str)
-                    
-                    should_use = result.get("should_use_skill", False)
-                    skill_name = result.get("skill_name")
-                    params = result.get("parameters", {})
-                    
-                    # Validate skill name exists
-                    if should_use and skill_name and skill_name in self._skill_metadata:
-                        logger.info(f"[SkillSelector-By-LLM] Selected skill: {skill_name}, params: {params}")
-                        return should_use, skill_name, params
-                    else:
-                        logger.info(f"[SkillSelector-By-LLM] No skill selected or skill not found")
-                        return False, None, None
+                should_use = result.get("should_use_skill", False)
+                skill_name = result.get("skill_name")
+                params = result.get("parameters", {})
+                
+                # Validate skill name exists
+                if should_use and skill_name and skill_name in self._skill_metadata:
+                    logger.info(f"[SkillSelector-By-LLM] Selected skill: {skill_name}, params: {params}")
+                    return should_use, skill_name, params
+                else:
+                    logger.info(f"[SkillSelector-By-LLM] No skill selected or skill not found")
+                    return False, None, None
             
             logger.warning("[SkillSelector-By-LLM] Invalid LLM response format")
             return False, None, None

@@ -406,7 +406,7 @@ async def qa_endpoint(req: QARequest):
     # 先检查是否需要使用技能
     from app.skills.skill_manager import get_skill_manager
     skill_manager = get_skill_manager()
-    use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question)
+    use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question, provider=provider)
     
     docs = []
     sources = []

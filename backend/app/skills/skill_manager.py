@@ -96,11 +96,11 @@ class SkillManager:
             return skill.get_resource(resource_path)
         return None
     
-    def should_use_skill(self, question):
+    def should_use_skill(self, question, provider="openai"):
         if not self.enabled or not self._skills:
             return False, None, None
         logger.info("[SkillManager] Using LLM to select skill for question")
-        should_use, skill_name, params = self.skill_selector.select_skill_with_llm(question)
+        should_use, skill_name, params = self.skill_selector.select_skill_with_llm(question, provider=provider)
         if should_use and skill_name and skill_name not in self._skills:
             logger.warning(f"[SkillManager] Selected skill '{skill_name}' not loaded, skipping")
             return False, None, None

@@ -54,7 +54,7 @@ class ArxivWatcherSkill(BaseSkill):
         # 当前使用方案 A，如需更宽泛可切换为方案 B
         return ti_query
     
-    def execute(self, query="", max_results=20, **kwargs):
+    def execute(self, query="", max_results=100, **kwargs):
         """
         Execute ArXiv search - precise matching, full results
         """

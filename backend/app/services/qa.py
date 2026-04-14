@@ -265,7 +265,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     
     # 检查是否需要使用技能
     skill_manager = get_skill_manager()
-    use_skill, skill_name, skill_params = skill_manager.should_use_skill(question)
+    use_skill, skill_name, skill_params = skill_manager.should_use_skill(question, provider=provider)
     
     print(f"[QA DEBUG] Question: {question}")
     print(f"[QA DEBUG] Use skill: {use_skill}")
