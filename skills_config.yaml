@@ -1,0 +1,7 @@
+global:
+  enabled: true
+  auto_discover: true
+
+arxiv-watcher:
+  enabled: true
+  version: 1.0.0

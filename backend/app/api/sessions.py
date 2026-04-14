@@ -3,6 +3,7 @@ Session management API routes
 """
 from typing import List, Optional
 from datetime import datetime
+from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -14,34 +15,52 @@ from app.models.session import Session as ChatSession
 from app.models.message import Message
 
 
-def format_local_time(dt):
+BEIJING_TZ = ZoneInfo('Asia/Shanghai')
+
+
+def format_beijing_time(dt):
     """
-    将 datetime 对象格式化为本地时间字符串
-    避免时区偏移问题，直接返回 HH:MM 格式
+    将 datetime 对象转换为北京时间字符串，返回 HH:MM 格式
     """
     if dt is None:
         return None
     try:
         if isinstance(dt, str):
-            # 如果已经是字符串，尝试解析
+            # 如果已经是字符串，尝试解析为 datetime
             from datetime import datetime
             dt = datetime.fromisoformat(dt.replace('Z', '+00:00'))
         
-        # 格式化为本地时间 HH:MM
-        return dt.strftime('%H:%M')
-    except Exception:
+        # 确保 datetime 对象有时区信息，如果没有则假设是 UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+        
+        # 转换为北京时间
+        dt_beijing = dt.astimezone(BEIJING_TZ)
+        
+        # 格式化为 HH:MM
+        return dt_beijing.strftime('%H:%M')
+    except Exception as e:
+        print(f'[DEBUG] Error formatting time: {e}')
         return None
 
 
 def safe_isoformat(dt):
-    """安全地将 datetime 对象转换为 ISO 格式字符串"""
+    """安全地将 datetime 对象转换为带时区的 ISO 格式字符串（北京时间）"""
     if dt is None:
         return None
     if isinstance(dt, str):
         return dt
     try:
-        return dt.isoformat()
-    except Exception:
+        # 确保 datetime 对象有时区信息，如果没有则假设是 UTC
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=ZoneInfo('UTC'))
+        
+        # 转换为北京时间
+        dt_beijing = dt.astimezone(BEIJING_TZ)
+        
+        return dt_beijing.isoformat()
+    except Exception as e:
+        print(f'[DEBUG] Error converting to ISO format: {e}')
         return None
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])

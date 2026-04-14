@@ -47,6 +47,30 @@ export const useAppStore = defineStore('app', () => {
     }
   }
 
+  // 格式化时间为北京时间 HH:MM
+  function formatBeijingTime(timeValue) {
+    if (!timeValue) {
+      return '--:--'
+    }
+    // 如果已经是格式化的时间字符串，直接返回
+    if (typeof timeValue === 'string' && timeValue.includes(':') && !timeValue.includes('T')) {
+      return timeValue
+    }
+    try {
+      const date = new Date(timeValue)
+      if (!isNaN(date.getTime())) {
+        // 转换为北京时间
+        const beijingDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
+        const hours = beijingDate.getHours().toString().padStart(2, '0')
+        const minutes = beijingDate.getMinutes().toString().padStart(2, '0')
+        return `${hours}:${minutes}`
+      }
+    } catch (e) {
+      console.error('[DEBUG] Failed to format time:', timeValue, e)
+    }
+    return '--:--'
+  }
+
   // 加载会话消息
   async function loadSessionMessages(sessionId) {
     try {
@@ -56,37 +80,11 @@ export const useAppStore = defineStore('app', () => {
       const messages = result.messages || []
       console.log('[DEBUG] Messages received from API:', messages.length)
       chatMessages.value = messages.map(m => {
-        let formattedTime = '--:--'
-        try {
-          if (m.created_at) {
-            // 处理 ISO 格式字符串，避免时区偏移
-            if (typeof m.created_at === 'string' && m.created_at.includes('T')) {
-              // 例如：2024-04-11T18:30:00 -> 直接取 18:30
-              const timePart = m.created_at.split('T')[1]
-              if (timePart) {
-                const hourMinute = timePart.split(':').slice(0, 2).join(':')
-                if (hourMinute) {
-                  formattedTime = hourMinute
-                }
-              }
-            } else {
-              // 正常解析
-              const date = new Date(m.created_at)
-              if (!isNaN(date.getTime())) {
-                const hours = date.getHours().toString().padStart(2, '0')
-                const minutes = date.getMinutes().toString().padStart(2, '0')
-                formattedTime = `${hours}:${minutes}`
-              }
-            }
-          }
-        } catch (e) {
-          console.error('[DEBUG] Failed to parse time:', m.created_at, e)
-        }
         return {
           id: m.id,
           role: m.role,
           text: m.content,
-          time: formattedTime,
+          time: formatBeijingTime(m.created_at),
           sources: m.sources
         }
       })

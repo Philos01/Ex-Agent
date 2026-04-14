@@ -1,5 +1,5 @@
 {
-  "provider": "openai",
+  "provider": "ollama",
   "embedding_mode": "openai",
   "local_embedding_model": "Qwen/Qwen3-Embedding-0.6B",
   "local_model_cache_dir": "",
@@ -44,6 +44,13 @@
     "max_history_rounds": 5,
     "exclude_error_messages": true,
     "exclude_questionable_messages": false
+  },
+  "skills": {
+    "enabled": true,
+    "arxiv_search": {
+      "enabled": true,
+      "max_results": 5
+    }
   },
   "allow_pdf_conversion": false
 }

@@ -21,6 +21,8 @@ router = APIRouter(tags=["api"])
 class Message(BaseModel):
     role: str  # "user" 或 "assistant"
     content: str
+    skill_result: Optional[str] = None  # 技能执行结果（用于上下文）
+    skill_name: Optional[str] = None  # 使用的技能名称
 
 
 class QARequest(BaseModel):
@@ -401,9 +403,19 @@ async def qa_endpoint(req: QARequest):
     print(f"[DEBUG]   frequency_penalty: {req.frequency_penalty}")
     print(f"[DEBUG]   messages history: {len(req.messages)} messages")
     
-    from app.services.qa import _retrieve_documents
-    docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
-    sources = [d.get("metadata", {}) for d in docs]
+    # 先检查是否需要使用技能
+    from app.skills.skill_manager import get_skill_manager
+    skill_manager = get_skill_manager()
+    use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question)
+    
+    docs = []
+    sources = []
+    
+    if not use_skill:
+        # 不使用技能时才进行 RAG 检索
+        from app.services.qa import _retrieve_documents
+        docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
+        sources = [d.get("metadata", {}) for d in docs]
     
     # 收集生成参数
     generation_params = {
@@ -416,8 +428,12 @@ async def qa_endpoint(req: QARequest):
         "messages": [{"role": m.role, "content": m.content} for m in req.messages]
     }
     
-    # 判断是否应该显示引用材料
-    def should_show_sources(question, sources_list):
+    # 判断是否应该显示引用材料（仅在不使用技能时）
+    def should_show_sources(question, sources_list, using_skill):
+        # 如果使用技能，不显示 RAG 的 sources
+        if using_skill:
+            return False
+        
         # 如果没有搜索结果，不显示
         if not sources_list or len(sources_list) == 0:
             return False
@@ -429,7 +445,7 @@ async def qa_endpoint(req: QARequest):
                 return False
         
         # 检查是否是纯闲聊问题
-        casual_keywords = ['天气', '笑话', '故事', '聊天', '你好', '嗨', '哈喽', '早上好', '下午好', '晚上好']
+        casual_keywords = ['笑话', '故事', '聊天', '你好', '嗨', '哈喽', '早上好', '下午好', '晚上好']
         is_casual = any(keyword in question for keyword in casual_keywords)
         
         # 如果是闲聊且没有相关搜索结果，不显示
@@ -442,16 +458,20 @@ async def qa_endpoint(req: QARequest):
     # 总是使用流式响应，兼容前端期望的格式
     def event_generator():
         # 只在需要时发送sources
-        if should_show_sources(req.question, sources):
+        if should_show_sources(req.question, sources, use_skill):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
         else:
             # 发送空sources
             yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
         # 然后发送answer的stream，包含state事件
         for item in stream_answer(req.question, provider=provider, include_state=True, **generation_params):
-            if isinstance(item, dict) and item.get('type') == 'state':
-                # 这是一个state事件
-                yield f"data: {json.dumps(item)}\n\n"
+            if isinstance(item, dict):
+                if item.get('type') == 'state':
+                    # 这是一个state事件
+                    yield f"data: {json.dumps(item)}\n\n"
+                elif item.get('type') == 'skill_result':
+                    # 这是技能结果事件，发送给前端
+                    yield f"data: {json.dumps(item)}\n\n"
             else:
                 # 这是一个content事件
                 yield f"data: {json.dumps({'type': 'content', 'content': item})}\n\n"

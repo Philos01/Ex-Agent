@@ -362,7 +362,7 @@ import { marked } from 'marked'
 const store = useAppStore()
 const route = useRoute()
 
-// 安全的时间格式化函数 - 修复时区问题
+// 安全的时间格式化函数 - 统一使用北京时间
 const formatTime = (timeValue) => {
   if (!timeValue) {
     return '--:--'
@@ -372,30 +372,12 @@ const formatTime = (timeValue) => {
     return timeValue
   }
   try {
-    let date
-    if (typeof timeValue === 'string') {
-      // 处理 ISO 格式字符串，避免时区偏移
-      if (timeValue.includes('T')) {
-        // 对于 ISO 格式，直接提取本地时间
-        // 例如：2024-04-11T18:30:00 -> 直接取 18:30
-        const timePart = timeValue.split('T')[1]
-        if (timePart) {
-          const hourMinute = timePart.split(':').slice(0, 2).join(':')
-          if (hourMinute) {
-            return hourMinute
-          }
-        }
-      }
-      // 如果以上方法不行，尝试正常解析
-      date = new Date(timeValue)
-    } else if (timeValue instanceof Date) {
-      date = timeValue
-    }
-    
+    const date = new Date(timeValue)
     if (date && !isNaN(date.getTime())) {
-      // 使用本地时区格式化
-      const hours = date.getHours().toString().padStart(2, '0')
-      const minutes = date.getMinutes().toString().padStart(2, '0')
+      // 转换为北京时间
+      const beijingDate = new Date(date.toLocaleString('en-US', { timeZone: 'Asia/Shanghai' }))
+      const hours = beijingDate.getHours().toString().padStart(2, '0')
+      const minutes = beijingDate.getMinutes().toString().padStart(2, '0')
       return `${hours}:${minutes}`
     }
   } catch (e) {

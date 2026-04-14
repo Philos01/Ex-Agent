@@ -110,6 +110,14 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
     setMessages(m => [...m, assistantMsg])
 
     try {
+      // 准备对话历史，包含 skill_result
+      const messagesForAPI = messages.map(msg => ({
+        role: msg.role,
+        content: msg.text,
+        skill_result: msg.skill_result || null,
+        skill_name: msg.skill_name || null
+      }))
+      
       const response = await fetch('/api/qa', {
         method: 'POST',
         headers: {
@@ -118,6 +126,7 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
         body: JSON.stringify({ 
           question: q, 
           stream: true,
+          messages: messagesForAPI,
           ...params
         }),
       })
@@ -158,6 +167,34 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
                       text: fullText,
                       timestamp: '刚刚',
                       sources: currentSources
+                    }
+                  }
+                  return newMessages
+                })
+              } else if (data.type === 'state') {
+                // 处理状态事件 - 更新时间戳为当前思考状态
+                setMessages(m => {
+                  const newMessages = [...m]
+                  const lastMessage = newMessages[newMessages.length - 1]
+                  if (lastMessage && lastMessage.role === 'assistant') {
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      timestamp: data.message,
+                      sources: currentSources
+                    }
+                  }
+                  return newMessages
+                })
+              } else if (data.type === 'skill_result') {
+                // 处理技能结果事件 - 保存技能结果到对话历史
+                setMessages(m => {
+                  const newMessages = [...m]
+                  const lastMessage = newMessages[newMessages.length - 1]
+                  if (lastMessage && lastMessage.role === 'assistant') {
+                    newMessages[newMessages.length - 1] = {
+                      ...lastMessage,
+                      skill_result: data.result,
+                      skill_name: data.skill_name
                     }
                   }
                   return newMessages

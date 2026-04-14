@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.api import routes
 from app.api import auth
 from app.api import sessions
+from app.api import skills
 from app.core.rate_limit import login_limiter, api_limiter
 
 app = FastAPI(title="实验室智能助手 - 后端")
@@ -32,6 +33,7 @@ async def rate_limit_middleware(request: Request, call_next):
 app.include_router(routes.router, prefix="/api")
 app.include_router(auth.router, prefix="/api")
 app.include_router(sessions.router, prefix="/api")
+app.include_router(skills.router, prefix="/api")
 
 # Root endpoint
 @app.get("/")
