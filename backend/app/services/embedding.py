@@ -8,8 +8,6 @@ from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from pathlib import Path
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 
@@ -90,7 +88,19 @@ class LocalEmbeddingProvider(BaseEmbeddingProvider):
             raise RuntimeError("本地模型未初始化")
         
         try:
-            embeddings = self._model.encode(texts, show_progress_bar=False)
+            # 过滤掉空字符串
+            filtered_texts = []
+            for text in texts:
+                if text and text.strip():
+                    filtered_texts.append(text)
+                else:
+                    logger.warning("发现空字符串文本，跳过嵌入")
+            
+            if not filtered_texts:
+                logger.error("没有有效的文本可嵌入（所有文本都是空的）")
+                raise ValueError("没有有效的文本可嵌入")
+            
+            embeddings = self._model.encode(filtered_texts, show_progress_bar=False)
             return embeddings.tolist()
         except Exception as e:
             logger.error(f"本地嵌入失败: {e}")
@@ -144,8 +154,20 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
     def embed_texts(self, texts):
         """调用OpenAI API进行嵌入"""
         try:
+            # 过滤掉空字符串
+            filtered_texts = []
+            for text in texts:
+                if text and text.strip():
+                    filtered_texts.append(text)
+                else:
+                    logger.warning("发现空字符串文本，跳过嵌入")
+            
+            if not filtered_texts:
+                logger.error("没有有效的文本可嵌入（所有文本都是空的）")
+                raise ValueError("没有有效的文本可嵌入")
+            
             response = self._client.embeddings.create(
-                input=texts,
+                input=filtered_texts,
                 model=self.model
             )
             return [r.embedding for r in response.data]

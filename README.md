@@ -139,7 +139,7 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 ##### 步骤 6：启动后端服务
 
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 后端服务将运行在 `http://localhost:8000`

@@ -26,7 +26,7 @@
   "hybrid_search": {
     "enabled": true,
     "initial_retrieve_count": 20,
-    "final_select_count": 3,
+    "final_select_count": 5,
     "bm25_weight": 0.5,
     "embedding_weight": 0.5,
     "rerank_model": "BAAI/bge-reranker-v2-m3",
@@ -36,7 +36,7 @@
     "enabled": true,
     "relevance_threshold": 0.8,
     "summary_top_k": 5,
-    "content_top_k": 3,
+    "content_top_k": 50,
     "auto_generate_summary": true
   },
   "context_management": {

@@ -14,7 +14,8 @@ export const useAppStore = defineStore('app', () => {
     top_p: 0.9,
     max_tokens: 2048,
     presence_penalty: 0.0,
-    frequency_penalty: 0.0
+    frequency_penalty: 0.0,
+    enable_thinking: false
   })
   const isLoading = ref(false)
   const isSessionsLoaded = ref(false)

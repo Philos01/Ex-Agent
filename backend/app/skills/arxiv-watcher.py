@@ -46,7 +46,7 @@ class ArxivWatcherSkill(BaseSkill):
             return f"all:{quote_plus(keywords)}"
         
         # 方案 A: 标题中包含所有关键词（最精准）
-        ti_query = " AND ".join([f"ti:{quote_plus(term)}" for term in terms])
+        ti_query = [f"{quote_plus(term)}" for term in terms]
         
         # 方案 B: 标题或摘要中包含所有关键词（稍宽泛）
         # abs_query = " AND ".join([f"(ti:{quote_plus(term)} OR abs:{quote_plus(term)})" for term in terms])
@@ -76,12 +76,12 @@ class ArxivWatcherSkill(BaseSkill):
                 }
             
             # Step 2: 构建精准查询（所有关键词必须同时出现）
-            search_query = self._build_precise_query(cleaned_query)
-            print(f"[arxiv-watcher DEBUG] Precise query: {search_query}")
+            # search_query = self._build_precise_query(cleaned_query)
+            print(f"[arxiv-watcher DEBUG] Precise query: {cleaned_query}")
             
             base_url = "https://export.arxiv.org/api/query"
             params = {
-                "search_query": search_query,
+                "search_query": cleaned_query,
                 "start": 0,
                 "max_results": max_results,
                 "sortBy": "relevance",
@@ -166,7 +166,7 @@ class ArxivWatcherSkill(BaseSkill):
                 "success": True,
                 "query": query,
                 "cleaned_query": cleaned_query,
-                "search_query_used": search_query,  # 🔹 方便调试实际搜索语句
+                "search_query_used": cleaned_query,  # 🔹 方便调试实际搜索语句
                 "total_found": len(papers),
                 "max_results_requested": max_results,
                 "papers": papers  # 🔹 完整列表，前端可遍历展示所有

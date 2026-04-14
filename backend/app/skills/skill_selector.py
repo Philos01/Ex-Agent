@@ -62,15 +62,23 @@ class SkillSelector:
     
     def _call_ollama(self, prompt):
         """调用Ollama模型（非流式）"""
+        from ollama import chat
         try:
-            endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
+            # endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
             model_name = self.cfg.get("ollama_model")
             logger.info(f"[SkillSelector-By-LLM] Calling Ollama with model: {model_name}")
             
             # 设置 stream=False 确保返回单个 JSON 对象而不是流式响应
-            r = requests.post(endpoint, json={"model": model_name, "prompt": prompt, "stream": False}, timeout=60)
-            r.raise_for_status()
-            return r.json().get("response", "")
+            # r = requests.post(endpoint, json={"model": model_name, "prompt": prompt, "stream": False}, timeout=60)
+            response = chat(
+                              model=model_name,
+                              messages=[{'role': 'user', 'content': prompt}],
+                              think=False,
+                              stream=False,
+                            )
+            return response.message.content.strip()
+            # r.raise_for_status()
+            # return r.json().get("response", "")
         except Exception as e:
             logger.error(f"[SkillSelector-By-LLM] Ollama call failed: {str(e)}")
             raise

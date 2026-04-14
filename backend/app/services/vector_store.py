@@ -11,8 +11,6 @@ from typing import List
 import logging
 from app.services.embedding import EmbeddingService
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # 确保数据目录存在
@@ -172,6 +170,11 @@ def search(query: str, top_k: int = 5, provider: str = None):
     Returns:
         搜索结果列表
     """
+    # 检查查询是否为空
+    if not query or not query.strip():
+        logger.error("查询为空，无法执行向量检索")
+        return []
+    
     collection = init_collection()
     
     try:
@@ -217,6 +220,11 @@ def search_by_filenames(query: str, filenames: List[str], top_k: int = 5, provid
     Returns:
         搜索结果列表
     """
+    # 检查查询是否为空
+    if not query or not query.strip():
+        logger.error("查询为空，无法执行向量检索")
+        return []
+    
     collection = init_collection()
     
     try:

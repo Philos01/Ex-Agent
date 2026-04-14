@@ -152,12 +152,15 @@
         <!-- Ollama 模型 -->
         <div v-if="cfg.provider === 'ollama'" class="space-y-3">
           <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">Ollama 模型</label>
-          <input 
+          <select 
             v-model="cfg.ollama_model"
             @input="handleOllamaModelChange"
             placeholder="llama2"
             class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
-          />
+          >
+            <option value="qwen3:4b-instruct">Qwen3:4b-instruct</option>
+            <option value="Qwen3:4B">Qwen3:4B</option>
+          </select>
         </div>
       </div>
     </section>

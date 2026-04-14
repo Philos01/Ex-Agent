@@ -99,7 +99,6 @@ class SkillManager:
     def should_use_skill(self, question, provider="openai"):
         if not self.enabled or not self._skills:
             return False, None, None
-        logger.info("[SkillManager] Using LLM to select skill for question")
         should_use, skill_name, params = self.skill_selector.select_skill_with_llm(question, provider=provider)
         if should_use and skill_name and skill_name not in self._skills:
             logger.warning(f"[SkillManager] Selected skill '{skill_name}' not loaded, skipping")
@@ -114,14 +113,14 @@ class SkillManager:
             logger.info(f"Executing skill: {skill_name}, params: {kwargs}")
             print(f"[SKILL DEBUG] Executing skill: {skill_name}, params: {kwargs}")
             result = skill.execute(**kwargs)
-            print(f"[SKILL DEBUG] Skill execution result: {result}")
+            print(f"[SKILL DEBUG] Skill execution result: {result['success']}")
             return result
         except Exception as e:
             logger.error(f"Skill execution failed: {skill_name}, error: {str(e)}", exc_info=True)
             return {"success": False, "error": f"Skill execution failed: {str(e)}"}
     
     def format_skill_result(self, result):
-        print(f"[SKILL DEBUG] Formatting skill result: {result}")
+        print(f"[SKILL DEBUG] Formatting skill result: {result['success']}")
         if not result.get("success"):
             return f"Search failed: {result.get('error', 'Unknown error')}"
         if "papers" in result:

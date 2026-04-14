@@ -42,6 +42,11 @@ class TwoLayerRetriever:
         Returns:
             检索结果列表
         """
+        # 检查原始查询是否为空
+        if not query or not query.strip():
+            logger.error("原始查询为空，无法执行检索")
+            return []
+        
         logger.info(f"开始双层检索: query='{query}'")
         
         # 1. 查询改写 - 在摘要检索前优化查询
@@ -49,12 +54,10 @@ class TwoLayerRetriever:
         query_rewrite_service = get_query_rewrite_service()
         rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider, use_summary_config=True)
         
-        if rewritten_query != query:
-            logger.info(f"查询改写成功: '{query}' -> '{rewritten_query}'")
-        else:
-            logger.info(f"使用原始查询: '{query}'")
-        
-        logger.info(f"[DEBUG] 最终用于检索的查询: '{rewritten_query}'")
+        # 二次验证改写后的查询，如果为空则使用原始查询
+        if not rewritten_query or not rewritten_query.strip():
+            logger.warning("改写后的查询为空，使用原始查询")
+            rewritten_query = query
         
         # 第一层：检索摘要，找到相关文件（使用改写后的查询）
         summary_results = self._search_summaries(rewritten_query, provider)

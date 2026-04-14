@@ -59,15 +59,18 @@ class QueryRewriteService:
 
 请直接输出改写后的查询，不要包含任何额外的说明或解释。"""
 
-        user_prompt = f"请改写以下查询，使其更适合检索系统：\n\n{query}"
-        
-        logger.info(f"[DEBUG] 查询改写: provider={provider}, enable={enabled}")
-        
+        user_prompt = f"请改写以下查询，使其更适合检索系统,只输出结果即可，不要输出其他任何内容：\n\n{query}"
+                
         try:
             if provider == "ollama":
                 result = self._rewrite_with_ollama(cfg, system_prompt, user_prompt, query)
             else:
                 result = self._rewrite_with_openai(cfg, system_prompt, user_prompt, query)
+            
+            # 检查改写结果是否为空，如果是则返回原始查询
+            if not result or not result.strip():
+                logger.warning(f"查询改写返回空结果，使用原始查询: '{query}'")
+                return query
             
             logger.info(f"[DEBUG] 查询改写返回: '{result}'")
             return result
@@ -107,7 +110,6 @@ class QueryRewriteService:
                 and completion.choices[0].message.content
             ):
                 rewritten = completion.choices[0].message.content.strip()
-                print(f"改写结果: {rewritten}")
                 logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
                 return rewritten
             
@@ -119,30 +121,41 @@ class QueryRewriteService:
     
     def _rewrite_with_ollama(self, cfg, system_prompt: str, user_prompt: str, original_query: str) -> str:
         """使用 Ollama 改写查询"""
+        from ollama import chat  # 确保在需要时才导入 Ollama SDK
         try:
-            endpoint = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/chat"
+            response = chat(
+                              model=cfg.get("ollama_model", "llama2"),
+                              messages=[
+                                            {"role": "system", "content": system_prompt},
+                                            {"role": "user", "content": user_prompt}
+                                        ],
+                              think=False,
+                              stream=False,
+                            )
+            # endpoint = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/chat"
+            # print(f"[DEBUG] Ollama endpoint: {endpoint}")
+            # response = requests.post(
+            #     endpoint,
+            #     json={
+            #         "model": cfg.get("ollama_model", "llama2"),
+            #         "messages": [
+            #             {"role": "system", "content": system_prompt},
+            #             {"role": "user", "content": user_prompt}
+            #         ],
+            #         "think": False, 
+            #         "stream": False,
+            #         "options": {
+            #             "temperature": 0.7
+            #         }
+            #     },
+            #     timeout=30
+            # )
+            # print(json)
+            # response.raise_for_status()
             
-            response = requests.post(
-                endpoint,
-                json={
-                    "model": cfg.get("ollama_model", "llama2"),
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.7,
-                        "num_predict": 256
-                    }
-                },
-                timeout=30
-            )
-            response.raise_for_status()
-            
-            result = response.json()
-            if "message" in result and "content" in result["message"]:
-                rewritten = result["message"]["content"].strip()
+            # result = response.json()
+            if "message" in response and "content" in response["message"]:
+                rewritten = response["message"]["content"].strip()
                 print(f"改写结果: {rewritten}")
                 logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
                 return rewritten

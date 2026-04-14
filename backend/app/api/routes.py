@@ -35,6 +35,7 @@ class QARequest(BaseModel):
     max_tokens: int = None
     presence_penalty: float = None
     frequency_penalty: float = None
+    enable_thinking: bool = None  # 是否启用思考阶段
     messages: List[Message] = []  # 对话历史
 
 
@@ -401,6 +402,7 @@ async def qa_endpoint(req: QARequest):
     print(f"[DEBUG]   max_tokens: {req.max_tokens}")
     print(f"[DEBUG]   presence_penalty: {req.presence_penalty}")
     print(f"[DEBUG]   frequency_penalty: {req.frequency_penalty}")
+    print(f"[DEBUG]   enable_thinking: {req.enable_thinking}")
     print(f"[DEBUG]   messages history: {len(req.messages)} messages")
     
     # 先检查是否需要使用技能
@@ -425,6 +427,7 @@ async def qa_endpoint(req: QARequest):
         "max_tokens": req.max_tokens,
         "presence_penalty": req.presence_penalty,
         "frequency_penalty": req.frequency_penalty,
+        "enable_thinking": req.enable_thinking,
         "messages": [{"role": m.role, "content": m.content} for m in req.messages]
     }
     

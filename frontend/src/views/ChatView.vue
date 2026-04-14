@@ -161,6 +161,25 @@
       <div class="max-w-full md:max-w-4xl mx-auto relative group">
         <div class="absolute inset-0 bg-primary/5 blur-xl rounded-full opacity-0 group-focus-within:opacity-100 transition-opacity"></div>
         <div class="relative flex items-end gap-2 md:gap-4 bg-surface-container-lowest p-2 md:p-3 rounded-xl md:rounded-2xl shadow-lg shadow-on-surface/[0.03] border border-outline-variant/20 focus-within:border-primary/40 transition-all">
+          
+          <button
+            @click="toggleThinking"
+            :class="[
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all',
+              params.enable_thinking 
+                ? 'bg-primary/10 text-primary' 
+                : 'bg-surface-container-high text-on-surface-variant'
+            ]"
+            :disabled="loading || streaming"
+            :title="params.enable_thinking ? '禁用思考模式' : '启用思考模式'"
+          >
+            <span class="material-symbols-outlined text-base md:text-lg" style="font-variation-settings: 'FILL' 1">
+              {{ params.enable_thinking ? 'psychology' : 'psychology_alt' }}
+            </span>
+            <span class="text-xs font-semibold">
+              {{ params.enable_thinking ? 'Thinking' : 'Unthinking' }}
+            </span>
+          </button>
           <textarea 
             v-model="q" 
             @keydown="handleKeyDown"
@@ -485,8 +504,14 @@ const resetParams = () => {
     top_p: 0.9,
     max_tokens: 2048,
     presence_penalty: 0.0,
-    frequency_penalty: 0.0
+    frequency_penalty: 0.0,
+    enable_thinking: false
   }
+  updateParams()
+}
+
+const toggleThinking = () => {
+  params.value.enable_thinking = !params.value.enable_thinking
   updateParams()
 }
 
@@ -703,6 +728,7 @@ const sendStream = async () => {
       max_tokens: params.value.max_tokens,
       presence_penalty: params.value.presence_penalty,
       frequency_penalty: params.value.frequency_penalty,
+      enable_thinking: params.value.enable_thinking,
       history_count: historyMessages.length
     })
     
@@ -718,6 +744,7 @@ const sendStream = async () => {
         max_tokens: params.value.max_tokens,
         presence_penalty: params.value.presence_penalty,
         frequency_penalty: params.value.frequency_penalty,
+        enable_thinking: params.value.enable_thinking,
         messages: historyMessages
       })
     })

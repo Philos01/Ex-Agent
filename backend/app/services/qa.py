@@ -245,6 +245,7 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
 def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None, 
                   top_p: float = None, max_tokens: int = None, 
                   presence_penalty: float = None, frequency_penalty: float = None,
+                  enable_thinking: bool = None,
                   messages: List[dict] = None, include_state: bool = False):
     """
     流式回答问题
@@ -292,7 +293,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             yield {"type": "state", "phase": "skill_call", "message": f"{skill_name} 技能执行完成", "progress": 40}
         
         context = f"## 技能执行结果\n{skill_result_text}"
-        print(f"[QA DEBUG] Context (skill mode): {context[:200]}...")
+        print(f"[QA DEBUG] Context (skill mode): {context}...")
     else:
         # 不使用技能，进行正常的 RAG 检索
         print(f"[QA DEBUG] Using RAG mode")
@@ -453,16 +454,16 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 ---
 
 ## 🧠 核心工作流与路由逻辑 (Workflow & Routing)
-请严格按照以下优先级（从 1 到 5）分析 `&lt;user_question&gt;`，并执行对应的响应策略：
+请严格按照以下优先级（从 1 到 5）分析 `<user_question>`，并执行对应的响应策略：
 
-### 🔴 优先级 1：自我认知类 (Identity &amp; Meta-questions)
+### 🔴 优先级 1：自我认知类 (Identity & Meta-questions)
 - **触发条件**：询问你的身份、创造者、能力范围或组内定位（如"你是谁？"、"你能干嘛？"）。
 - **执行动作**：
-  1. 忽略 `&lt;retrieved_context&gt;`。
+  1. 忽略 `<retrieved_context>`。
   2. 骄傲且专业地回答："我是宁波大学 RS-NBU 课题组的专属 AI 学术助理。我的大脑中汇集了课题组的论文、代码、会议记录等宝贵资料。我在这里帮助组内师生解决多源遥感图像融合、深度学习算法开发及各项科研问题。我还可以帮你搜索最新的 ArXiv 学术论文！"
 
 ### 🟡 优先级 2：基于外部搜索结果的问答 (External Search Mode)
-- **触发条件**：`&lt;retrieved_context&gt;` 中包含"## 外部搜索结果"，且用户问题与搜索内容相关。
+- **触发条件**：`<retrieved_context>` 中包含"## 外部搜索结果"，且用户问题与搜索内容相关。
 - **执行动作**：
   1. **优先使用外部搜索结果**：如果用户询问最新研究、论文、学术动态等，首先使用外部搜索到的 ArXiv 论文信息进行回答。
   2. **论文摘要总结**：对搜索到的每篇论文进行简要总结，突出核心贡献、方法和结论。
@@ -470,12 +471,13 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
   4. **结合内部知识**：如果内部知识库中有相关内容，可以结合起来回答。
 
 ### 🟢 优先级 3：基于组内知识库的问答 (Internal RAG Mode) - 【核心功能】
-- **触发条件**：问题涉及具体的算法细节、论文出处、历年实验数据、组内规范等，且 `<retrieved_context>` 中包含相关信息。
+- **触发条件**：问题涉及具体的算法细节、论文出处、历年实验数据、组内规范等，或用户询问“我们组做过什么”、“组内关于XX的研究”等针对课题组的情况。
 - **执行动作**：
-  1. **绝对忠诚**：严格基于 `<retrieved_context>` 提供的信息作答，禁止凭空捏造组内未做过的研究。
-  2. **溯源引用**：在每个关键结论或数据后，必须以学术规范标注来源。格式示例：`[引用: 2023_张三_TGRS论文.pdf]` 或 `[引用: 20240312_组会记录]`。
-  3. **结构化输出**：如果是询问算法对比或实验步骤，请用 Markdown 表格或有序列表呈现。
-  4. **信息不足处理**：如果检索到的组内资料不全，请明确告知："根据检索到的课题组内部资料，仅包含以下信息..."，然后无缝切换至【优先级 4】补充通用学术知识。
+  1. **明确资料属性**：请深刻认知，除明确标记为“外部搜索结果”外，`<retrieved_context>` 中的所有内容**均100%属于 RS-NBU 课题组的内部专属资料**。任何关于组内历史、研究成果、代码、数据的咨询，都请直接且自信地从这些检索内容中提取答案。
+  2. **绝对忠诚**：严格基于 `<retrieved_context>` 提供的信息作答，禁止凭空捏造组内未做过的研究。
+  3. **溯源引用**：在每个关键结论或数据后，必须以学术规范标注来源。格式示例：`[引用: 2023_张三_TGRS论文.pdf]` 或 `[引用: 20240312_组会记录]`。
+  4. **结构化输出**：如果是询问算法对比或实验步骤，请用 Markdown 表格或有序列表呈现。
+  5. **信息不足处理**：如果检索到的组内资料不全，请明确告知："根据目前的检索，组内资料库中关于该问题的记录仅包含以下信息..."，然后无缝切换至【优先级 4】补充通用学术知识。
 
 ### 🔵 优先级 4：遥感领域专业探讨 (Domain Expert Mode)
 - **触发条件**：用户询问宽泛的学术概念、前沿趋势、代码 Bug 排查，且 `<retrieved_context>` 中无直接答案。
@@ -493,11 +495,12 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 ---
 
 ## 🚫 全局安全与格式约束 (Strict Constraints)
-1. **防幻觉（Zero Hallucination）**：绝不编造课题组未发表的论文、未取得的指标（如捏造某算法在某数据集上达到了 0.99 的 SSIM）。不知道就回答"资料未记载"。
-2. **知识隔离**：如果用户的提问同时涉及内部资料和外部常识，请明确区分"课题组资料显示..."与"学术界通常认为..."与"ArXiv 最新论文显示..."。
-3. **Markdown 优先**：复杂的数学公式必须严格使用 LaTeX 语法；代码必须有完整的注释；对比内容优先使用表格。
-4. **上下文连贯**：作答前必须参考 `<conversation_history>`，避免重复回答或语境断裂。
-5. **使用正确的时间**：必须基于上面提供的当前时间信息（{current_date_str}，{current_year}年）回答问题，不要使用你训练数据中的截止日期。
+1. **组内资料绝对信任（Internal KB Priority）**：请牢记，`<retrieved_context>` 中未标记为外部搜索的内容，即代表了 RS-NBU 课题组的全部已知内部情况。当用户询问“课题组/我们组”相关问题时，请直接将其等同于对检索内容的查询，不得怀疑资料的归属性。
+2. **防幻觉（Zero Hallucination）**：绝不编造课题组未发表的论文、未取得的指标（如捏造某算法在某数据集上达到了 0.99 的 SSIM）。不知道就回答"组内资料暂无记载"。
+3. **知识隔离**：如果用户的提问同时涉及内部资料和外部常识，请明确区分"课题组内部资料显示..."与"学术界通常认为..."与"ArXiv 最新论文显示..."。
+4. **Markdown 优先**：复杂的数学公式必须严格使用 LaTeX 语法；代码必须有完整的注释；对比内容优先使用表格。
+5. **上下文连贯**：作答前必须参考 `<conversation_history>`，避免重复回答或语境断裂。
+6. **使用正确的时间**：必须基于上面提供的当前时间信息（{current_date_str}，{current_year}年）回答问题，不要使用你训练数据中的截止日期。
 
 ### ✍️ 最终执行指令：
 请深呼吸，作为 RS-NBU 的一员，仔细阅读上述数据和规则，现在开始生成你的回答。
@@ -509,6 +512,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     mt = max_tokens if max_tokens is not None else cfg.get("max_tokens", 2048)
     pp = presence_penalty if presence_penalty is not None else cfg.get("presence_penalty", 0.0)
     fp = frequency_penalty if frequency_penalty is not None else cfg.get("frequency_penalty", 0.0)
+    et = enable_thinking if enable_thinking is not None else cfg.get("enable_thinking", False)
     
     # 调试日志
     print(f"[DEBUG] stream_answer using parameters:")
@@ -547,6 +551,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             if OLLAMA_SDK_AVAILABLE:
                 # 使用ollama Python SDK
                 print(f"[DEBUG] Using Ollama SDK with model: {cfg.get('ollama_model')}")
+                print(f"[DEBUG] enable_thinking: {et}")
                 stream = chat(
                     model=cfg.get('ollama_model'),
                     messages=[{'role': 'user', 'content': prompt}],
@@ -557,27 +562,34 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                         "num_predict": mt
                     },
                     stream=True,
-                    think=False  # 启用thinking阶段输出（如果模型支持）
+                    think=et  # 启用thinking阶段输出（如果模型支持）
                 )
                 
                 in_thinking = False
                 for chunk in stream:
-                    if hasattr(chunk, 'message'):
-                        # 检查是否有thinking字段（Qwen3.5等模型）
-                        if hasattr(chunk.message, 'thinking') and chunk.message.thinking and not in_thinking:
-                            in_thinking = True
-                            print('Thinking phase started')
+                    # 安全获取字段，避免部分 chunk 缺失 thinking/content 属性时报错
+                    thinking = getattr(chunk.message, 'thinking', None)
+                    content = getattr(chunk.message, 'content', None)
+                
+                    # 1. 检测到思考阶段开始
+                    if thinking and not in_thinking:
+                        in_thinking = True
+                        print('Thinking:\n', end='')
+                
+                    # 2. 处理思考内容（实时流式打印）
+                    if thinking:
+                        print(thinking, end='')
                         
-                        if hasattr(chunk.message, 'thinking') and chunk.message.thinking:
-                            # 输出思考过程（可选，用于调试）
-                            # print(chunk.message.thinking, end='')
-                            pass
-                        elif hasattr(chunk.message, 'content') and chunk.message.content:
-                            if in_thinking:
-                                in_thinking = False
-                            # 输出最终答案
-                            processed_chunk = process_stream_chunk(chunk.message.content)
-                            yield processed_chunk
+                    # 3. 处理最终回答内容
+                    elif content:
+                        if in_thinking:
+                            # 思考结束，首次输出答案时打印分隔提示
+                            print('\n\nAnswer:\n', end='')
+                            in_thinking = False
+                            
+                        # 保留原有的数据处理与 yield 机制，供外部迭代器继续消费
+                        processed_chunk = process_stream_chunk(content)
+                        yield processed_chunk
             else:
                 # 回退到直接HTTP请求
                 print(f"[DEBUG] Ollama SDK not available, falling back to HTTP request")
@@ -593,7 +605,8 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                     "model": cfg.get("ollama_model"), 
                     "prompt": prompt, 
                     "stream": True,
-                    "options": ollama_options
+                    "options": ollama_options,
+                    "think": et  # 启用thinking阶段输出（如果模型支持）
                 }, stream=True, timeout=60)
                 r.raise_for_status()
                 

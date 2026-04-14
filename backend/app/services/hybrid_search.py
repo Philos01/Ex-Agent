@@ -47,6 +47,11 @@ class HybridSearchService:
         Returns:
             检索结果列表
         """
+        # 检查原始查询是否为空
+        if not query or not query.strip():
+            logger.error("原始查询为空，无法执行混合检索")
+            return []
+        
         start_time = time.time()
         
         # 获取配置参数
@@ -71,6 +76,11 @@ class HybridSearchService:
             query_rewrite_service = get_query_rewrite_service()
             rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider)
             
+            # 二次验证改写后的查询，如果为空则使用原始查询
+            if not rewritten_query or not rewritten_query.strip():
+                logger.warning("改写后的查询为空，使用原始查询")
+                rewritten_query = query
+            
             if rewritten_query != query:
                 logger.info(f"查询改写成功: '{query}' -> '{rewritten_query}'")
             else:
@@ -80,6 +90,10 @@ class HybridSearchService:
         else:
             logger.info(f"[DEBUG] 跳过查询改写，直接使用传入的查询: '{query}'")
             rewritten_query = query
+            # 验证传入的查询
+            if not rewritten_query or not rewritten_query.strip():
+                logger.error("传入的查询为空，无法执行混合检索")
+                return []
         
         # 2. 并行检索 BM2.5 和 向量
         bm25_docs = self._search_bm25(rewritten_query, initial_count)

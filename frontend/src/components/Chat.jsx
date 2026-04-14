@@ -12,7 +12,8 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
     top_p: 0.9,
     max_tokens: 2048,
     presence_penalty: 0.0,
-    frequency_penalty: 0.0
+    frequency_penalty: 0.0,
+    enable_thinking: false
   })
   const [showSidebar, setShowSidebar] = useState(false)
   const endRef = useRef(null)
@@ -76,7 +77,8 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
       top_p: 0.9,
       max_tokens: 2048,
       presence_penalty: 0.0,
-      frequency_penalty: 0.0
+      frequency_penalty: 0.0,
+      enable_thinking: false
     }
     setParams(defaultParams)
     if (onParamsChange) {
@@ -344,6 +346,20 @@ export default function Chat({ onSessionEnd, initialMessages, initialParams, onM
             <div className="max-w-4xl mx-auto relative group">
               <div className="absolute inset-0 bg-primary/5 blur-xl rounded-full opacity-0 group-focus-within:opacity-100 transition-opacity"></div>
               <div className="relative flex items-end gap-4 bg-surface-container-lowest p-3 rounded-2xl shadow-lg shadow-on-surface/[0.03] border border-outline-variant/20 focus-within:border-primary/40 transition-all">
+                {/* Thinking 开关按钮 */}
+                <button
+                  onClick={() => handleParamChange('enable_thinking', !params.enable_thinking)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-xl transition-all ${params.enable_thinking ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'}`}
+                  disabled={loading || streaming}
+                  title={params.enable_thinking ? "禁用思考模式" : "启用思考模式"}
+                >
+                  <span className="material-symbols-outlined text-lg" style={{ fontVariationSettings: 'FILL 1' }}>
+                    {params.enable_thinking ? 'psychology' : 'psychology_alt'}
+                  </span>
+                  <span className="text-xs font-semibold">
+                    {params.enable_thinking ? '思考中' : '思考'}
+                  </span>
+                </button>
                 <textarea 
                   value={q} 
                   onChange={e => setQ(e.target.value)} 
