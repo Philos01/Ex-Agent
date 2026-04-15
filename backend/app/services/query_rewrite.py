@@ -124,12 +124,12 @@ class QueryRewriteService:
         from ollama import chat  # 确保在需要时才导入 Ollama SDK
         try:
             response = chat(
-                              model=cfg.get("ollama_model", "llama2"),
+                              model="qwen3:4b-instruct",  # 可以从配置中获取模型名称
                               messages=[
                                             {"role": "system", "content": system_prompt},
                                             {"role": "user", "content": user_prompt}
                                         ],
-                              think=False,
+                              think=cfg.get("enable_thinking", False),
                               stream=False,
                             )
             # endpoint = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/chat"
@@ -150,12 +150,9 @@ class QueryRewriteService:
             #     },
             #     timeout=30
             # )
-            # print(json)
-            # response.raise_for_status()
-            
-            # result = response.json()
-            if "message" in response and "content" in response["message"]:
-                rewritten = response["message"]["content"].strip()
+            # 正确访问 response 对象的属性
+            if hasattr(response, "message") and hasattr(response.message, "content"):
+                rewritten = response.message.content.strip()
                 print(f"改写结果: {rewritten}")
                 logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
                 return rewritten

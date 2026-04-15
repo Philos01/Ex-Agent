@@ -65,7 +65,7 @@ class SkillSelector:
         from ollama import chat
         try:
             # endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
-            model_name = self.cfg.get("ollama_model")
+            model_name = "qwen3:4b-instruct"  # 可以从配置中获取模型名称
             logger.info(f"[SkillSelector-By-LLM] Calling Ollama with model: {model_name}")
             
             # 设置 stream=False 确保返回单个 JSON 对象而不是流式响应

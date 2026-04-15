@@ -3,7 +3,7 @@ from ollama import chat
 response = chat(
   model='qwen3:4b-instruct',
   messages=[{'role': 'user', 'content': 'How many letter r are in strawberry?'}],
-  think=False,
+  think=True,
   stream=False,
 )
 

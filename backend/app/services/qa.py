@@ -706,19 +706,27 @@ def _retrieve_documents(question: str, provider: str = "openai", top_k: int = 5)
     """
     cfg = load_config()
     
+    print(f"[DEBUG _retrieve_documents] 开始检索，问题: {question[:50]}...")
+    
     # 检查是否启用双层检索
     summary_config = cfg.get("summary_search", {})
     use_two_layer = summary_config.get("enabled", False)
     
+    print(f"[DEBUG _retrieve_documents] 双层检索配置: enabled={use_two_layer}")
+    
     if use_two_layer:
         try:
+            print(f"[DEBUG _retrieve_documents] 尝试使用双层检索...")
             from app.services.two_layer_search import two_layer_search
             logger.info("使用双层检索")
-            return two_layer_search(question, provider=provider)
+            result = two_layer_search(question, provider=provider)
+            print(f"[DEBUG _retrieve_documents] 双层检索返回 {len(result)} 个结果")
+            return result
         except Exception as e:
             logger.error(f"双层检索失败，回退到混合检索: {e}")
             import traceback
             logger.error(traceback.format_exc())
+            print(f"[DEBUG _retrieve_documents] 双层检索异常: {e}")
     
     # 检查是否启用混合检索
     hybrid_config = cfg.get("hybrid_search", {})

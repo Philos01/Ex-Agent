@@ -42,15 +42,20 @@ class TwoLayerRetriever:
         Returns:
             检索结果列表
         """
+        print(f"[DEBUG TwoLayerRetriever.search] 双层检索已被调用，查询: '{query[:50]}...'")
+        
         # 检查原始查询是否为空
         if not query or not query.strip():
             logger.error("原始查询为空，无法执行检索")
+            print(f"[DEBUG TwoLayerRetriever.search] 错误：查询为空")
             return []
         
         logger.info(f"开始双层检索: query='{query}'")
+        print(f"[DEBUG TwoLayerRetriever.search] 开始双层检索，原始查询: '{query}'")
         
         # 1. 查询改写 - 在摘要检索前优化查询
         logger.info(f"[DEBUG] 开始查询改写，原始查询: '{query}', provider: {provider}")
+        print(f"[DEBUG TwoLayerRetriever.search] 开始查询改写...")
         query_rewrite_service = get_query_rewrite_service()
         rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider, use_summary_config=True)
         
@@ -111,11 +116,15 @@ class TwoLayerRetriever:
         Returns:
             摘要检索结果，包含相关性分数
         """
+        print(f"[DEBUG TwoLayerRetriever._search_summaries] 开始检索摘要，查询: '{query[:50]}...'")
         store = get_summary_store()
         all_summaries = store.get_all_summaries()
         
+        print(f"[DEBUG TwoLayerRetriever._search_summaries] 获取到 {len(all_summaries)} 个摘要")
+        
         if not all_summaries:
             logger.info("没有可用的文档摘要")
+            print(f"[DEBUG TwoLayerRetriever._search_summaries] 没有可用的文档摘要")
             return []
         
         logger.info(f"共有 {len(all_summaries)} 个文档摘要待检索")
