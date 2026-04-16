@@ -1,0 +1,11 @@
+{
+  "owner": "wyatt88",
+  "slug": "amap-weather",
+  "displayName": "Amap Weather (高德天气)",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": 1774324538756,
+    "commit": "https://github.com/openclaw/skills/commit/daad64161881ae398d8a1fc0185860ade867cbc8"
+  },
+  "history": []
+}

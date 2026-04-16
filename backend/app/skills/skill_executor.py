@@ -1,6 +1,7 @@
 
 """
 Skill Executor - Execute .sh or .py files from skill packages
+Enhanced with soft-coded parameter passing and configuration support
 """
 import subprocess
 import sys
@@ -15,27 +16,74 @@ logger = logging.getLogger(__name__)
 class SkillExecutor:
     """
     Skill Executor - Support executing .sh and .py files
+    with flexible parameter passing configuration
     """
     
     def __init__(self, skill_dir):
-        self.skill_dir = skill_dir
-        self.scripts_dir = skill_dir / "scripts"
+        self.skill_dir = Path(skill_dir)
+        self.scripts_dir = self.skill_dir / "scripts"
+        self.config = self._load_skill_config()
+    
+    def _load_skill_config(self):
+        """
+        Load skill execution configuration from various sources
         
+        Configuration sources (highest priority first):
+        1. skill_config.json in skill package
+        2. _meta.json in skill package
+        3. Default configuration
+        
+        Returns:
+            dict: Skill execution configuration
+        """
+        config = {
+            "python_param_arg": "--params",
+            "shell_pass_query_as_arg": True,
+            "shell_query_param_name": "query",
+            "env_var_prefix": "SKILL_PARAM_",
+            "output_json": True
+        }
+        
+        # Try skill_config.json
+        skill_config_path = self.skill_dir / "skill_config.json"
+        if skill_config_path.exists():
+            try:
+                with open(skill_config_path, 'r', encoding='utf-8') as f:
+                    custom_config = json.load(f)
+                    config.update(custom_config)
+                logger.info(f"[SkillExecutor] Loaded custom config from {skill_config_path}")
+            except Exception as e:
+                logger.warning(f"[SkillExecutor] Failed to load skill_config.json: {e}")
+        
+        # Try _meta.json
+        meta_path = self.skill_dir / "_meta.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path, 'r', encoding='utf-8') as f:
+                    meta = json.load(f)
+                    if "skillConfig" in meta:
+                        config.update(meta["skillConfig"])
+                        logger.info(f"[SkillExecutor] Loaded config from _meta.json")
+            except Exception as e:
+                logger.warning(f"[SkillExecutor] Failed to load config from _meta.json: {e}")
+        
+        return config
+    
     def find_executable(self):
         """
-        Find executable file in skill package
+        Find executable file in skill package (prioritize .py for cross-platform)
         
         Returns:
             Found executable path, or None
         """
         # Check scripts directory first
         if self.scripts_dir.exists():
-            # Look for .py files
+            # Look for .py files first (cross-platform)
             py_files = list(self.scripts_dir.glob("*.py"))
             if py_files:
                 return py_files[0]
             
-            # Look for .sh files
+            # Look for .sh files (Unix only)
             sh_files = list(self.scripts_dir.glob("*.sh"))
             if sh_files:
                 return sh_files[0]
@@ -53,7 +101,7 @@ class SkillExecutor:
     
     def execute_python(self, script_path, params):
         """
-        Execute Python script
+        Execute Python script with flexible parameter passing
         
         Args:
             script_path: Python script path
@@ -63,7 +111,6 @@ class SkillExecutor:
             Execution result dictionary
         """
         try:
-            # Method 1: Call via subprocess (isolated environment)
             import tempfile
             
             # Create temporary parameter file
@@ -72,11 +119,12 @@ class SkillExecutor:
                 params_file = f.name
             
             try:
-                # Build command
+                # Build command with configurable param argument
+                param_arg = self.config.get("python_param_arg", "--params")
                 cmd = [
                     sys.executable,
                     str(script_path),
-                    "--params",
+                    param_arg,
                     params_file
                 ]
                 
@@ -86,6 +134,8 @@ class SkillExecutor:
                     cmd,
                     capture_output=True,
                     text=True,
+                    encoding='utf-8',
+                    errors='replace',
                     timeout=60,
                     cwd=str(self.skill_dir)
                 )
@@ -100,6 +150,10 @@ class SkillExecutor:
                 # Try to parse JSON output
                 try:
                     output = json.loads(result.stdout)
+                    # 如果输出已经有 success 字段，直接返回（避免双重嵌套）
+                    if "success" in output:
+                        return output
+                    # 否则包装一层
                     return {
                         "success": True,
                         "data": output
@@ -112,7 +166,10 @@ class SkillExecutor:
                     
             finally:
                 # Cleanup temporary file
-                os.unlink(params_file)
+                try:
+                    os.unlink(params_file)
+                except Exception:
+                    pass
                 
         except Exception as e:
             logger.error("[SkillExecutor] Python execution error: {}".format(e), exc_info=True)
@@ -123,7 +180,7 @@ class SkillExecutor:
     
     def execute_shell(self, script_path, params):
         """
-        Execute Shell script
+        Execute Shell script with flexible parameter passing
         
         Args:
             script_path: Shell script path
@@ -136,21 +193,31 @@ class SkillExecutor:
             # Build command - pass params as environment variables
             env = os.environ.copy()
             
-            # Add parameters as environment variables
+            # Add parameters as environment variables with configurable prefix
+            env_prefix = self.config.get("env_var_prefix", "SKILL_PARAM_")
             for key, value in params.items():
-                env_key = "SKILL_PARAM_{}".format(key.upper())
+                env_key = "{}{}".format(env_prefix, key.upper())
                 env[env_key] = str(value)
             
             # Ensure script is executable
             if os.name != 'nt':
-                os.chmod(script_path, 0o755)
+                try:
+                    os.chmod(script_path, 0o755)
+                except Exception:
+                    pass
             
-            # Build command
-            cmd = [str(script_path)]
+            # Build command - handle Windows compatibility
+            if os.name == 'nt':
+                # On Windows, use bash if available, or provide helpful error
+                cmd = ["bash", str(script_path)]
+            else:
+                cmd = [str(script_path)]
             
-            # If query parameter exists, pass as first argument
-            if "query" in params:
-                cmd.append(str(params["query"]))
+            # Configurable argument passing
+            if self.config.get("shell_pass_query_as_arg", True):
+                query_param_name = self.config.get("shell_query_param_name", "query")
+                if query_param_name in params:
+                    cmd.append(str(params[query_param_name]))
             
             logger.info("[SkillExecutor] Executing Shell: {}".format(' '.join(cmd)))
             
@@ -158,6 +225,8 @@ class SkillExecutor:
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding='utf-8',
+                errors='replace',
                 timeout=60,
                 cwd=str(self.skill_dir),
                 env=env
@@ -184,7 +253,7 @@ class SkillExecutor:
     
     def execute(self, params):
         """
-        Execute skill
+        Execute skill with flexible configuration
         
         Args:
             params: Parameter dictionary

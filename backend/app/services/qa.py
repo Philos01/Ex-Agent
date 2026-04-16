@@ -6,7 +6,7 @@ from datetime import datetime
 from app.services.vector_store import search
 from app.services.hybrid_search import hybrid_search
 from app.core.config import load_config
-from app.skills.skill_manager import get_skill_manager
+from app.skills import get_skill_manager
 from openai import OpenAI
 import requests
 import re

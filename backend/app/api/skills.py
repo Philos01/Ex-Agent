@@ -35,8 +35,8 @@ async def list_skills():
         List of skill metadata including name and description
     """
     try:
-        from app.skills.skill_manager import get_skill_manager
-        skill_manager = get_skill_manager()
+        from app.skills import get_skill_manager
+        skill_manager = get_new_skill_manager()
         skills = skill_manager.list_skills()
         return {
             "success": True,
@@ -60,17 +60,18 @@ async def get_skill_metadata(skill_name: str):
         Skill metadata (name and description)
     """
     try:
-        from app.skills.skill_manager import get_skill_manager
-        skill_manager = get_skill_manager()
-        metadata = skill_manager.get_skill_metadata(skill_name)
+        from app.skills import get_skill_manager
+        skill_manager = get_new_skill_manager()
+        skills = skill_manager.list_skills()
+        skill_info = next((s for s in skills if s["name"] == skill_name), None)
         
-        if not metadata:
+        if not skill_info:
             raise HTTPException(status_code=404, detail=f"Skill not found: {skill_name}")
         
         return {
             "success": True,
             "skill_name": skill_name,
-            "metadata": metadata
+            "metadata": {"name": skill_info["name"], "description": skill_info["description"]}
         }
     except HTTPException:
         raise
@@ -91,9 +92,33 @@ async def get_skill_instructions(skill_name: str):
         Full SKILL.md content if available
     """
     try:
-        from app.skills.skill_manager import get_skill_manager
-        skill_manager = get_skill_manager()
-        instructions = skill_manager.get_skill_instructions(skill_name)
+        from app.skills import get_skill_manager
+        from pathlib import Path
+        skill_manager = get_new_skill_manager()
+        skills = skill_manager.list_skills()
+        skill_info = next((s for s in skills if s["name"] == skill_name), None)
+        
+        instructions = None
+        if skill_info:
+            # Try to read SKILL.md for package skills
+            project_root = Path(__file__).parent.parent.parent.parent
+            skill_dir = project_root / "skills" / skill_name
+            skill_md_path = skill_dir / "SKILL.md"
+            if skill_md_path.exists():
+                try:
+                    with open(skill_md_path, 'r', encoding='utf-8') as f:
+                        instructions = f.read()
+                except Exception:
+                    pass
+        
+        # Fallback to legacy manager if needed
+        if instructions is None:
+            try:
+                from app.skills.skill_manager import get_skill_manager
+                legacy_manager = get_skill_manager()
+                instructions = legacy_manager.get_skill_instructions(skill_name)
+            except Exception:
+                pass
         
         return {
             "success": True,
@@ -145,8 +170,8 @@ async def execute_skill(request: SkillExecuteRequest):
         Skill execution result, including formatted output for LLM consumption
     """
     try:
-        from app.skills.skill_manager import get_skill_manager
-        skill_manager = get_skill_manager()
+        from app.skills import get_skill_manager
+        skill_manager = get_new_skill_manager()
         
         logger.info(f"Executing skill: {request.skill_name} with params: {request.parameters}")
         
@@ -180,8 +205,8 @@ async def auto_execute_skill(question: str):
         Skill execution result if a skill was triggered, or indication that no skill matched
     """
     try:
-        from app.skills.skill_manager import get_skill_manager
-        skill_manager = get_skill_manager()
+        from app.skills import get_skill_manager
+        skill_manager = get_new_skill_manager()
         
         should_use, skill_name, params = skill_manager.should_use_skill(question)
         

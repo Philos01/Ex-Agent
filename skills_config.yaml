@@ -5,3 +5,7 @@ global:
 arxiv-watcher:
   enabled: true
   version: 1.0.0
+
+amp-weather:
+  enabled: true
+  version: 1.0.0

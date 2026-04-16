@@ -49,8 +49,10 @@
   "skills": {
     "enabled": true,
     "arxiv_search": {
-      "enabled": true,
-      "max_results": 5
+      "enabled": true
+    },
+    "amap_weather": {
+      "enabled": true
     }
   },
   "allow_pdf_conversion": false
