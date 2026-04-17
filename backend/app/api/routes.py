@@ -36,6 +36,7 @@ class QARequest(BaseModel):
     presence_penalty: float = None
     frequency_penalty: float = None
     enable_thinking: bool = None  # 是否启用思考阶段
+    use_react: bool = None  # 是否启用 ReAct 多步推理模式
     messages: List[Message] = []  # 对话历史
 
 
@@ -428,6 +429,7 @@ async def qa_endpoint(req: QARequest):
         "presence_penalty": req.presence_penalty,
         "frequency_penalty": req.frequency_penalty,
         "enable_thinking": req.enable_thinking,
+        "use_react": req.use_react,
         "messages": [{"role": m.role, "content": m.content} for m in req.messages]
     }
     
@@ -460,8 +462,9 @@ async def qa_endpoint(req: QARequest):
     
     # 总是使用流式响应，兼容前端期望的格式
     def event_generator():
-        # 只在需要时发送sources
-        if should_show_sources(req.question, sources, use_skill):
+        # 只在需要时发送sources（ReAct 模式下不发送 RAG sources）
+        use_react_mode = req.use_react if req.use_react is not None else False
+        if not use_react_mode and should_show_sources(req.question, sources, use_skill):
             yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
         else:
             # 发送空sources
@@ -469,11 +472,10 @@ async def qa_endpoint(req: QARequest):
         # 然后发送answer的stream，包含state事件
         for item in stream_answer(req.question, provider=provider, include_state=True, **generation_params):
             if isinstance(item, dict):
-                if item.get('type') == 'state':
-                    # 这是一个state事件
-                    yield f"data: {json.dumps(item)}\n\n"
-                elif item.get('type') == 'skill_result':
-                    # 这是技能结果事件，发送给前端
+                # 处理所有 ReAct 相关事件
+                item_type = item.get('type')
+                if item_type in ['state', 'skill_result', 'react_thought', 'react_action', 
+                               'react_observation', 'react_final_answer', 'react_steps', 'react_error']:
                     yield f"data: {json.dumps(item)}\n\n"
             else:
                 # 这是一个content事件

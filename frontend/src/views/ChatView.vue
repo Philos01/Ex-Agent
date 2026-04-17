@@ -65,8 +65,16 @@
               
               <!-- 思考步骤组件 -->
               <ThinkingSteps 
-                v-if="m.thinkingState"
+                v-if="m.thinkingState && !m.reactSteps"
                 :current-state="m.thinkingState"
+                class="mb-4 md:mb-6"
+              />
+              
+              <!-- ReAct 思考过程展示组件 -->
+              <ReActThinkingDisplay 
+                v-if="m.reactSteps && m.reactSteps.length > 0"
+                :steps="m.reactSteps"
+                :is-running="index === messages.length - 1 && isReActRunning && params.use_react"
                 class="mb-4 md:mb-6"
               />
               
@@ -178,6 +186,24 @@
             </span>
             <span class="text-xs font-semibold">
               {{ params.enable_thinking ? 'Thinking' : 'Unthinking' }}
+            </span>
+          </button>
+          <button
+            @click="toggleReAct"
+            :class="[
+              'flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all',
+              params.use_react 
+                ? 'bg-tertiary/10 text-tertiary' 
+                : 'bg-surface-container-high text-on-surface-variant'
+            ]"
+            :disabled="loading || streaming"
+            :title="params.use_react ? '禁用 ReAct 多步推理模式' : '启用 ReAct 多步推理模式'"
+          >
+            <span class="material-symbols-outlined text-base md:text-lg" style="font-variation-settings: 'FILL' 1">
+              {{ params.use_react ? 'hub' : 'hub' }}
+            </span>
+            <span class="text-xs font-semibold">
+              {{ params.use_react ? 'ReAct' : 'No ReAct' }}
             </span>
           </button>
           <textarea 
@@ -363,6 +389,13 @@
       <!-- 稍微调整图标大小以适配容器 -->
       <span class="material-symbols-outlined text-2xl md:text-3xl">settings</span>
     </button>
+    
+    <!-- ReAct 模式提示组件 -->
+    <ReActModePrompt 
+      :visible="showReActPrompt"
+      @close="showReActPrompt = false"
+      ref="promptRef"
+    />
   </div>
 </template>
 
@@ -375,6 +408,8 @@ import { sessionService } from '../services/sessions'
 import ThinkingSteps from '../components/gen-ui/ThinkingSteps.vue'
 import CitationHoverCard from '../components/gen-ui/CitationHoverCard.vue'
 import DocumentPreviewPanel from '../components/gen-ui/DocumentPreviewPanel.vue'
+import ReActModePrompt from '../components/gen-ui/ReActModePrompt.vue'
+import ReActThinkingDisplay from '../components/gen-ui/ReActThinkingDisplay.vue'
 import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
 import { marked } from 'marked'
 
@@ -410,11 +445,17 @@ const messages = ref([...store.chatMessages])
 const loading = ref(false)
 const streaming = ref(false)
 const showSidebar = ref(false)
-const params = ref({ ...store.chatParams })
+const params = ref({ ...store.chatParams, use_react: false })
 const endRef = ref(null)
 const scrollRef = ref(null)
 const windowWidth = ref(window.innerWidth)
 const savingMessage = ref(false)
+
+// ReAct 模式相关状态
+const showReActPrompt = ref(false)
+const reactSteps = ref([])
+const isReActRunning = ref(false)
+const promptRef = ref(null)
 
 // 引用源悬停预览状态
 const hoverSource = ref({
@@ -505,7 +546,8 @@ const resetParams = () => {
     max_tokens: 2048,
     presence_penalty: 0.0,
     frequency_penalty: 0.0,
-    enable_thinking: false
+    enable_thinking: false,
+    use_react: false
   }
   updateParams()
 }
@@ -513,6 +555,17 @@ const resetParams = () => {
 const toggleThinking = () => {
   params.value.enable_thinking = !params.value.enable_thinking
   updateParams()
+}
+
+const toggleReAct = () => {
+  const newVal = !params.value.use_react
+  params.value.use_react = newVal
+  updateParams()
+  
+  // 如果开启 ReAct 模式，检查是否需要显示提示
+  if (newVal && promptRef.value && promptRef.value.checkShouldShow()) {
+    showReActPrompt.value = true
+  }
 }
 
 const handleSampleQuestion = (question) => {
@@ -709,6 +762,10 @@ const sendStream = async () => {
   streaming.value = true
   scrollToBottom()
   
+  // 初始化 ReAct 状态
+  reactSteps.value = []
+  isReActRunning.value = params.value.use_react
+  
   try {
     // 准备对话历史（不包含当前刚添加的用户消息和空助手消息）
     const historyMessages = []
@@ -729,6 +786,7 @@ const sendStream = async () => {
       presence_penalty: params.value.presence_penalty,
       frequency_penalty: params.value.frequency_penalty,
       enable_thinking: params.value.enable_thinking,
+      use_react: params.value.use_react,
       history_count: historyMessages.length
     })
     
@@ -745,6 +803,7 @@ const sendStream = async () => {
         presence_penalty: params.value.presence_penalty,
         frequency_penalty: params.value.frequency_penalty,
         enable_thinking: params.value.enable_thinking,
+        use_react: params.value.use_react,
         messages: historyMessages
       })
     })
@@ -756,14 +815,16 @@ const sendStream = async () => {
     let buffer = ''
     let fullText = ''
     let sources = []
+    let receivedFinalAnswer = false  // 防止答案重复
     
     while (true) {
       const { done, value } = await reader.read()
       if (done) break
       
       buffer += decoder.decode(value, { stream: true })
-      const lines = buffer.split('\n')
-      buffer = lines.pop()
+      // 使用SSE标准的\n\n分隔符
+      const lines = buffer.split('\n\n')
+      buffer = lines.pop() || ''
       
       for (const line of lines) {
         if (line.startsWith('data: ')) {
@@ -772,18 +833,19 @@ const sendStream = async () => {
           
           try {
             const parsed = JSON.parse(data)
+            const lastIndex = messages.value.length - 1
+            
             if (parsed.type === 'content') {
-              fullText += parsed.content
-              const lastIndex = messages.value.length - 1
-              messages.value[lastIndex].text = fullText
-              messages.value[lastIndex].time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
-              scrollToBottom()
+              if (!receivedFinalAnswer) {  // 如果还没有收到最终答案，才追加内容
+                fullText += parsed.content
+                messages.value[lastIndex].text = fullText
+                messages.value[lastIndex].time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+                scrollToBottom()
+              }
             } else if (parsed.type === 'sources') {
               sources = parsed.sources || []
-              const lastIndex = messages.value.length - 1
               messages.value[lastIndex].sources = sources
             } else if (parsed.type === 'state') {
-              const lastIndex = messages.value.length - 1
               messages.value[lastIndex].thinkingState = {
                 phase: parsed.phase,
                 message: parsed.message,
@@ -791,13 +853,79 @@ const sendStream = async () => {
               }
               scrollToBottom()
             } else if (parsed.type === 'component') {
-              const lastIndex = messages.value.length - 1
               messages.value[lastIndex].components = messages.value[lastIndex].components || []
               messages.value[lastIndex].components.push({
                 type: parsed.component,
                 props: parsed.props
               })
               scrollToBottom()
+            } else if (parsed.type === 'react_thought') {
+              reactSteps.value.push({
+                type: 'thought',
+                content: parsed.content,
+                timestamp: Date.now()
+              })
+              messages.value[lastIndex].reactSteps = [...reactSteps.value]
+              scrollToBottom()
+            } else if (parsed.type === 'react_action') {
+              reactSteps.value.push({
+                type: 'action',
+                name: parsed.name,
+                input: parsed.input,
+                timestamp: Date.now()
+              })
+              messages.value[lastIndex].reactSteps = [...reactSteps.value]
+              scrollToBottom()
+            } else if (parsed.type === 'react_observation') {
+              reactSteps.value.push({
+                type: 'observation',
+                content: parsed.content,
+                timestamp: Date.now()
+              })
+              messages.value[lastIndex].reactSteps = [...reactSteps.value]
+              scrollToBottom()
+            } else if (parsed.type === 'react_final_answer') {
+              console.log('[DEBUG] Received react_final_answer event:', parsed)
+              receivedFinalAnswer = true  // 设置标志，防止后续重复追加
+              const finalAnswerContent = parsed.content
+              reactSteps.value.push({
+                type: 'final_answer',
+                content: finalAnswerContent,
+                timestamp: Date.now()
+              })
+              messages.value[lastIndex].reactSteps = [...reactSteps.value]
+              // 同时更新 fullText 和消息文本
+              fullText = finalAnswerContent
+              messages.value[lastIndex].text = fullText
+              messages.value[lastIndex].time = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+              // 确保所有状态正确更新
+              console.log('[DEBUG] Setting states to false: isReActRunning, loading, streaming')
+              isReActRunning.value = false
+              loading.value = false
+              streaming.value = false
+              console.log('[DEBUG] States after reset:', {
+                isReActRunning: isReActRunning.value,
+                loading: loading.value,
+                streaming: streaming.value,
+                messageText: messages.value[lastIndex].text
+              })
+              // 使用 nextTick 确保 UI 更新
+              nextTick(() => {
+                console.log('[DEBUG] NextTick executed, forcing UI update')
+                console.log('[DEBUG] Message text in nextTick:', messages.value[lastIndex].text)
+                console.log('[DEBUG] isReActRunning in nextTick:', isReActRunning.value)
+              })
+              scrollToBottom()
+            } else if (parsed.type === 'react_steps') {
+              // 最终步骤列表
+              isReActRunning.value = false
+              loading.value = false
+              streaming.value = false
+            } else if (parsed.type === 'react_error') {
+              isReActRunning.value = false
+              loading.value = false
+              streaming.value = false
+              console.error('[ReAct] Error:', parsed.message)
             }
           } catch (e) {
             console.error('Parse error:', e)
@@ -820,8 +948,10 @@ const sendStream = async () => {
     const lastIndex = messages.value.length - 1
     messages.value[lastIndex].text = '抱歉，发生了错误。请检查网络连接或稍后重试。'
   } finally {
+    console.log('[DEBUG] Finally block executed, resetting all states')
     loading.value = false
     streaming.value = false
+    isReActRunning.value = false
     store.updateChatMessages(messages.value)
   }
 }

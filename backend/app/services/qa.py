@@ -242,10 +242,78 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
     return text, sources
 
 
+def _stream_answer_react(question: str, provider: str = "openai", messages: List[dict] = None):
+    """
+    ReAct模式的流式回答
+    
+    Args:
+        question: 当前用户问题
+        provider: LLM供应商
+        messages: 对话历史
+    
+    Yields:
+        ReAct事件
+    """
+    from app.agents import ReActAgent
+    
+    print(f"[DEBUG _stream_answer_react] Starting for question: {question[:50]}...")
+    
+    # 构建对话历史字符串
+    conversation_history = ""
+    if messages and len(messages) > 0:
+        conversation_history = "### 💬 对话历史：\n"
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            if role == "user":
+                conversation_history += f"用户: {content}\n"
+            elif role == "assistant":
+                conversation_history += f"助手: {content}\n"
+        conversation_history += "\n"
+    
+    # 初始化ReActAgent
+    agent = ReActAgent(provider=provider)
+    
+    # 流式执行并转换事件类型
+    event_count = 0
+    for event in agent.stream_run(question, conversation_history=conversation_history):
+        event_count += 1
+        event_type = event.get("type")
+        print(f"[DEBUG _stream_answer_react] Event {event_count}: type={event_type}")
+        
+        # 转换事件类型以匹配前端期望
+        if event_type == "thought":
+            yield {"type": "react_thought", "content": event.get("content")}
+        elif event_type == "action":
+            yield {"type": "react_action", "name": event.get("name"), "input": event.get("input")}
+        elif event_type == "observation":
+            yield {"type": "react_observation", "content": event.get("content")}
+        elif event_type == "final_answer":
+            final_content = event.get("content")
+            print(f"[DEBUG _stream_answer_react] Final answer content (length: {len(str(final_content))}): {str(final_content)[:100]}...")
+            yield {"type": "react_final_answer", "content": final_content}
+            # 同时发送content事件，确保消息文本被更新
+            print(f"[DEBUG _stream_answer_react] Yielding content event")
+            yield final_content
+        elif event_type == "done":
+            yield {"type": "react_steps", "steps": event.get("steps")}
+            # 发送state事件表示完成
+            yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
+        elif event_type == "error":
+            yield {"type": "react_error", "message": event.get("message")}
+        elif event_type == "thinking":
+            # 处理thinking事件，发送state更新
+            iteration = event.get("iteration", 1)
+            total = event.get("total", 5)
+            yield {"type": "state", "phase": "generating", "message": f"思考中 (第{iteration}/{total}步)", "progress": int(iteration / total * 75)}
+    
+    print(f"[DEBUG _stream_answer_react] Done, total {event_count} events processed")
+
+
 def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None, 
                   top_p: float = None, max_tokens: int = None, 
                   presence_penalty: float = None, frequency_penalty: float = None,
-                  enable_thinking: bool = None,
+                  enable_thinking: bool = None, use_react: bool = None,
                   messages: List[dict] = None, include_state: bool = False):
     """
     流式回答问题
@@ -259,9 +327,16 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         max_tokens: 最大令牌数
         presence_penalty: 存在惩罚
         frequency_penalty: 频率惩罚
+        enable_thinking: 是否启用思考阶段
+        use_react: 是否启用ReAct多步推理模式
         messages: 对话历史，格式为 [{"role": "user"|"assistant", "content": "..."}]
         include_state: 是否包含思考状态事件输出
     """
+    # 检查是否使用ReAct模式
+    if use_react:
+        print(f"[QA DEBUG] Using ReAct mode for question: {question[:50]}...")
+        yield from _stream_answer_react(question, provider=provider, messages=messages)
+        return
     cfg = load_config()
     
     # 检查是否需要使用技能

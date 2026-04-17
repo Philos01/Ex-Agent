@@ -55,5 +55,13 @@
       "enabled": true
     }
   },
+  "react": {
+    "enabled": true,
+    "max_iterations": 5,
+    "output_format": "json",
+    "use_few_shot": true,
+    "timeout": 60,
+    "max_retries": 3
+  },
   "allow_pdf_conversion": false
 }
