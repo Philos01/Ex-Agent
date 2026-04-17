@@ -5,7 +5,7 @@
 """
 import logging
 from typing import Optional
-from app.core.config import load_config
+from app.core.config import get_complete_config
 from openai import OpenAI
 import requests
 import json
@@ -17,7 +17,7 @@ class QueryRewriteService:
     """查询改写服务"""
     
     def __init__(self):
-        self.cfg = load_config()
+        self.cfg = get_complete_config()
     
     def rewrite_query(self, query: str, provider: str = None, use_summary_config: bool = False) -> str:
         """
@@ -31,7 +31,7 @@ class QueryRewriteService:
         Returns:
             改写后的查询
         """
-        cfg = load_config()
+        cfg = get_complete_config()
         provider = provider or cfg.get("provider", "openai")
         
         # 检查是否启用查询改写（根据配置来源）

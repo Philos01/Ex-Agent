@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from app.services.vector_store import search
 from app.services.hybrid_search import hybrid_search
-from app.core.config import load_config
+from app.core.config import load_config, get_complete_config
 from app.skills import get_skill_manager
 from openai import OpenAI
 import requests
@@ -136,7 +136,7 @@ def _get_openai_client(cfg):
 
 
 def answer_question(question: str, provider: str = "openai", top_k: int = 5, session_id: str = "default") -> Tuple[str, List[dict]]:
-    cfg = load_config()
+    cfg = get_complete_config()
     
     # 获取当前时间（北京时间）
     from zoneinfo import ZoneInfo
@@ -340,7 +340,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         print(f"[QA DEBUG] Using ReAct mode for question: {question[:50]}...")
         yield from _stream_answer_react(question, provider=provider, messages=messages)
         return
-    cfg = load_config()
+    cfg = get_complete_config()
     
     # 检查是否需要使用技能
     skill_manager = get_skill_manager()
@@ -782,7 +782,7 @@ def _retrieve_documents(question: str, provider: str = "openai", top_k: int = 5)
     Returns:
         检索到的文档列表
     """
-    cfg = load_config()
+    cfg = get_complete_config()
     
     print(f"[DEBUG _retrieve_documents] 开始检索，问题: {question[:50]}...")
     
@@ -833,7 +833,7 @@ def _get_filtered_history(session_id: str = "default") -> List[dict]:
     Returns:
         过滤后的历史消息列表
     """
-    cfg = load_config()
+    cfg = get_complete_config()
     context_config = cfg.get("context_management", {})
     
     if not context_config.get("enabled", True):
@@ -875,7 +875,7 @@ def _add_to_history(
         content: 消息内容
         session_id: 会话ID
     """
-    cfg = load_config()
+    cfg = get_complete_config()
     context_config = cfg.get("context_management", {})
     
     if not context_config.get("enabled", True):

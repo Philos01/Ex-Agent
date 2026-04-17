@@ -1,4 +1,4 @@
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 from typing import List, Optional
 import os
 import json
@@ -6,12 +6,16 @@ import subprocess
 import datetime
 import shutil
 
-from app.core.config import load_config, save_config, ensure_data_dirs, UPLOAD_DIR, METADATA_PATH
+from app.core.config import load_config, save_config, ensure_data_dirs, UPLOAD_DIR, METADATA_PATH, get_complete_config
+from app.core.dependencies import get_db, get_current_user
 from app.services.ingest import ingest_file
 from app.utils.file_utils import save_upload, list_uploaded_files, delete_uploaded_file
 from app.services.qa import answer_question, stream_answer
 from app.services.vector_store import get_collection_info, reset_collection, clear_all
 from app.services.embedding import get_recommended_models, EmbeddingService
+from app.services.audit import log_action
+from app.models.user import User
+from sqlalchemy.orm import Session
 from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
@@ -42,7 +46,7 @@ class QARequest(BaseModel):
 
 @router.post("/upload")
 async def upload_files(files: List[UploadFile] = File(...)):
-    cfg = load_config()
+    cfg = get_complete_config()
     ensure_data_dirs()
     saved = []
     failed = []  # 记录失败的文件
@@ -361,13 +365,55 @@ def clear_knowledge():
 
 
 @router.get("/config")
-def get_config():
+def get_config(current_user: User = Depends(get_current_user)):
+    """
+    Get system configuration (requires authentication)
+    Never returns sensitive credentials like API keys
+    """
+    # load_config() already ensures API keys are not included
     return load_config()
 
 
 @router.post("/config")
-def post_config(data: dict):
+def post_config(
+    data: dict, 
+    request: Request,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Update system configuration (admin only)
+    Never saves sensitive credentials like API keys
+    """
+    # Check if user is admin
+    if current_user.role.lower() != "admin":
+        raise HTTPException(
+            status_code=403,
+            detail="Only Administrators can modify system configuration"
+        )
+    
     cfg = load_config()
+    
+    # Get client info for audit log
+    client_host = request.client.host if request.client else None
+    user_agent = request.headers.get("user-agent")
+    
+    # Log each config change
+    for key, value in data.items():
+        old_value = cfg.get(key)
+        if old_value != value:
+            log_action(
+                db=db,
+                user=current_user,
+                action="config_change",
+                resource_type="system_config",
+                resource_id=key,
+                old_value=str(old_value) if old_value is not None else None,
+                new_value=str(value) if value is not None else None,
+                ip_address=client_host,
+                user_agent=user_agent
+            )
+    
     cfg.update(data)
     save_config(cfg)
     return {"status": "saved", "config": cfg}
@@ -391,7 +437,7 @@ def reset_vector_store():
 
 @router.post("/qa")
 async def qa_endpoint(req: QARequest):
-    cfg = load_config()
+    cfg = get_complete_config()
     provider = req.provider if req.provider else cfg.get("provider", "openai")
     
     # 调试日志

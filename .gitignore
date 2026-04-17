@@ -4,15 +4,35 @@ __pycache__/
 .venv/
 venv/
 
+# Environment variables (contains sensitive credentials)
+.env
+.env.local
+.env.*.local
+
 # Backend data and config
 backend/data/
-backend/config.json
+config.json
 
 # Node
 node_modules/
+frontend/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
 
 # 忽略所有数据库文件
 *.db
 *.sqlite3
 data/*.db
 data/**/*.sqlite3
+
+# Logs
+*.log
+logs/
+
+# Temporary files
+*.tmp
+*.temp

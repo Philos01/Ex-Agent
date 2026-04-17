@@ -6,7 +6,7 @@ import logging
 import json
 import requests
 from pathlib import Path
-from app.core.config import load_config
+from app.core.config import get_complete_config
 from app.skills.metadata_parser import get_skill_metadata
 from openai import OpenAI
 
@@ -21,7 +21,7 @@ class SkillSelector:
     def __init__(self, skills_dir):
         self.skills_dir = skills_dir
         self._skill_metadata = {}
-        self.cfg = load_config()
+        self.cfg = get_complete_config()
         self._load_all_skill_metadata()
     
     def _load_all_skill_metadata(self):

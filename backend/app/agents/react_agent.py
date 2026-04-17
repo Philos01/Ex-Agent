@@ -5,7 +5,7 @@ import logging
 import json
 import re
 from typing import Dict, Any, Optional, List, Generator
-from app.core.config import load_config
+from app.core.config import load_config, get_complete_config
 from app.skills import get_skill_manager
 from app.agents.memory import MemoryScratchpad
 from app.agents.output_parser import OutputParser
@@ -50,7 +50,7 @@ class ReActAgent:
             use_few_shot: 是否使用 Few-Shot 示例
             provider: LLM 提供商
         """
-        self.cfg = load_config()
+        self.cfg = get_complete_config()
         self.max_iterations = max_iterations
         self.provider = provider
         

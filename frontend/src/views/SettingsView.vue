@@ -1,7 +1,7 @@
 <template>
   <div class="px-4 md:px-12 py-6 md:py-8 max-w-5xl mx-auto space-y-6 md:space-y-10">
     <div class="space-y-2">
-      <h1 class="text-2xl md:text-4xl font-black text-on-surface tracking-tight">系统设置</h1>
+      <!-- <h1 class="text-2xl md:text-4xl font-black text-on-surface tracking-tight">系统设置</h1> -->
       <div class="flex items-center gap-3 md:gap-4 flex-wrap">
         <div class="px-3 py-1 rounded-full bg-secondary-container text-on-secondary-container text-[10px] font-bold uppercase tracking-widest">v2.4.0-Stable</div>
         <!-- 调试信息 -->
@@ -24,10 +24,10 @@
 
     <!-- 大语言模型引擎供应商 -->
     <section class="space-y-4 md:space-y-6">
-      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">
+      <!-- <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">
         大语言模型引擎
         <span class="text-primary">供应商</span>
-      </h2>
+      </h2> -->
       
       <div class="space-y-3 md:space-y-4">
         <!-- OpenAI -->
@@ -84,45 +84,34 @@
 
     <!-- API凭证 -->
     <section class="space-y-4 md:space-y-6">
-      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">API 凭证</h2>
+      <!-- <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">API 凭证</h2> -->
       
       <div class="space-y-4 md:space-y-6">
-        <!-- OpenAI API密钥 -->
+        <!-- OpenAI API配置提示 -->
         <div v-if="cfg.provider === 'openai'" class="space-y-3">
-          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">OpenAI API 密钥</label>
-          <div class="relative">
-            <input 
-              :type="showPassword ? 'text' : 'password'"
-              v-model="cfg.openai_api_key"
-              @input="handleApiKeyChange"
-              placeholder="sk-..."
-              class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 pr-12"
-            />
-            <button 
-              @click="showPassword = !showPassword"
-              class="absolute right-3 md:right-4 top-1/2 -translate-y-1/2 p-1 hover:bg-surface-container rounded-lg transition-colors"
-            >
-              <span class="material-symbols-outlined text-outline">
-                {{ showPassword ? 'visibility_off' : 'visibility' }}
-              </span>
-            </button>
+          <div class="bg-info/10 border border-info/20 rounded-xl p-4 space-y-3">
+            <div class="flex items-start gap-3">
+              <span class="material-symbols-outlined text-info">info</span>
+              <div>
+                <h4 class="font-bold text-info">API 凭证配置</h4>
+                <p class="text-sm text-info/80 mt-1">
+                  为安全起见，API 凭证现在通过环境变量配置。请在项目根目录创建 <code class="bg-surface-container px-1 py-0.5 rounded">.env</code> 文件，并设置以下环境变量：
+                </p>
+                <div class="mt-3 p-3 bg-surface-container rounded-lg font-mono text-sm">
+                  <p>OPENAI_API_KEY=your-api-key-here</p>
+                  <p>OPENAI_BASE_URL=https://api.openai.com/v1</p>
+                </div>
+                <p class="text-sm text-info/80 mt-3">
+                  修改 <code class="bg-surface-container px-1 py-0.5 rounded">.env</code> 文件后，需要重启后端服务以生效。
+                </p>
+              </div>
+            </div>
           </div>
-        </div>
-
-        <!-- API基础URL -->
-        <div v-if="cfg.provider === 'openai'" class="space-y-3">
-          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">OpenAI API 基础URL</label>
-          <input 
-            v-model="cfg.openai_base_url"
-            @input="handleBaseUrlChange"
-            placeholder="https://api.openai-hk.com/v1"
-            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-mono placeholder:text-outline/50 focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
-          />
         </div>
 
         <!-- 模型选择 -->
         <div v-if="cfg.provider === 'openai'" class="space-y-3">
-          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">聊天模型</label>
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">模型</label>
           <select 
             v-model="cfg.openai_chat_model"
             @change="handleModelChange"
@@ -151,7 +140,7 @@
 
         <!-- Ollama 模型 -->
         <div v-if="cfg.provider === 'ollama'" class="space-y-3">
-          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">Ollama 模型</label>
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">模型</label>
           <select 
             v-model="cfg.ollama_model"
             @input="handleOllamaModelChange"
@@ -166,10 +155,11 @@
     </section>
 
     <!-- 用户注册配置（仅管理员可见） -->
-    <section v-if="isAdmin" class="space-y-4 md:space-y-6">
-      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">用户注册配置</h2>
-      
-      <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4">
+    <div class="flex gap-4 md:gap-6">
+  <!-- 用户注册配置 -->
+  <section v-if="isAdmin" class="w-1/2">
+    <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4 h-full flex flex-col">
+      <div class="flex-grow">
         <div class="flex items-center justify-between">
           <div>
             <h3 class="font-bold text-on-surface text-lg">允许用户注册</h3>
@@ -178,7 +168,7 @@
           <button
             @click="allowUserRegistration = !allowUserRegistration"
             :disabled="registrationConfigLoading"
-            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0"
             :class="allowUserRegistration ? 'bg-primary' : 'bg-outline-variant'"
           >
             <div
@@ -187,25 +177,25 @@
             />
           </button>
         </div>
-        
-        <div class="pt-4 border-t border-outline-variant/20">
-          <button
-            @click="updateRegistrationConfig"
-            :disabled="registrationConfigLoading"
-            class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <span v-if="registrationConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
-            {{ registrationConfigLoading ? '更新中...' : '保存注册配置' }}
-          </button>
-        </div>
       </div>
-    </section>
-
-    <!-- PDF 转换配置（仅管理员可见） -->
-    <section v-if="isAdmin" class="space-y-4 md:space-y-6">
-      <h2 class="text-2xl md:text-3xl font-black text-on-surface tracking-tight">PDF 转换配置</h2>
       
-      <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4">
+      <div class="pt-4 border-t border-outline-variant/20">
+        <button
+          @click="updateRegistrationConfig"
+          :disabled="registrationConfigLoading"
+          class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <span v-if="registrationConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
+          {{ registrationConfigLoading ? '更新中...' : '保存注册配置' }}
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- PDF 转换配置 -->
+  <section v-if="isAdmin" class="w-1/2">
+    <div class="bg-surface-container-low rounded-xl md:rounded-2xl p-4 md:p-6 space-y-4 h-full flex flex-col">
+      <div class="flex-grow">
         <div class="flex items-center justify-between">
           <div>
             <h3 class="font-bold text-on-surface text-lg">允许 PDF 转换</h3>
@@ -214,7 +204,7 @@
           <button
             @click="allowPdfConversion = !allowPdfConversion"
             :disabled="pdfConversionConfigLoading"
-            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30"
+            class="relative w-16 h-8 rounded-full transition-colors duration-300 focus:outline-none focus:ring-2 focus:ring-primary/30 flex-shrink-0"
             :class="allowPdfConversion ? 'bg-primary' : 'bg-outline-variant'"
           >
             <div
@@ -223,19 +213,21 @@
             />
           </button>
         </div>
-        
-        <div class="pt-4 border-t border-outline-variant/20">
-          <button
-            @click="updatePdfConversionConfig"
-            :disabled="pdfConversionConfigLoading"
-            class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            <span v-if="pdfConversionConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
-            {{ pdfConversionConfigLoading ? '更新中...' : '保存 PDF 转换配置' }}
-          </button>
-        </div>
       </div>
-    </section>
+      
+      <div class="pt-4 border-t border-outline-variant/20">
+        <button
+          @click="updatePdfConversionConfig"
+          :disabled="pdfConversionConfigLoading"
+          class="w-full py-3 bg-primary text-on-primary rounded-xl font-bold hover:bg-primary/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+        >
+          <span v-if="pdfConversionConfigLoading" class="material-symbols-outlined animate-spin">progress_activity</span>
+          {{ pdfConversionConfigLoading ? '更新中...' : '保存 PDF 转换配置' }}
+        </button>
+      </div>
+    </div>
+  </section>
+</div>
 
     <!-- 保存按钮 -->
     <div class="pt-6 md:pt-8">
@@ -281,10 +273,6 @@ const cfg = ref({
 })
 
 const validate = () => {
-  if (cfg.value.provider === 'openai' && !cfg.value.openai_api_key?.trim()) {
-    error.value = '请输入 OpenAI API 密钥'
-    return false
-  }
   if (cfg.value.provider === 'ollama') {
     if (!cfg.value.ollama_url?.trim()) {
       error.value = '请输入 Ollama URL'

@@ -1,9 +1,8 @@
 {
-  "provider": "ollama",
+  "provider": "openai",
   "embedding_mode": "openai",
   "local_embedding_model": "Qwen/Qwen3-Embedding-0.6B",
   "local_model_cache_dir": "",
-  "openai_api_key": "hk-o65h0u10000551061c459307b992deafff94f3d9b53d13f1",
   "openai_base_url": "https://api.openai-hk.com/v1",
   "openai_embedding_model": "text-embedding-3-small",
   "openai_chat_model": "gpt-3.5-turbo",

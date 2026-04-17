@@ -203,9 +203,9 @@ const windowWidth = ref(window.innerWidth)
 const isMobile = computed(() => windowWidth.value < 768)
 
 const pageTitle = computed(() => {
-  if (router.currentRoute.value.path === '/chat') return 'Remote Sense 通用助手'
-  if (router.currentRoute.value.path === '/uploads') return 'RS AI'
-  if (router.currentRoute.value.path === '/settings') return '系统设置'
+  if (router.currentRoute.value.path === '/chat') return 'Ex-Agent'
+  if (router.currentRoute.value.path === '/uploads') return 'Ex-Agent'
+  if (router.currentRoute.value.path === '/settings') return 'Ex-Agent'
   return ''
 })
 

@@ -5,7 +5,7 @@
 import logging
 import json
 from typing import Dict, Any, Optional
-from app.core.config import load_config
+from app.core.config import get_complete_config
 from openai import OpenAI
 import requests
 
@@ -60,7 +60,7 @@ class DocumentSummarizer:
     """文档摘要生成器"""
     
     def __init__(self):
-        self.cfg = load_config()
+        self.cfg = get_complete_config()
     
     def _get_openai_client(self):
         """获取OpenAI客户端"""

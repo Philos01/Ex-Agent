@@ -5,7 +5,7 @@ Simple Chroma-backed vector store helpers
 """
 import os
 import shutil
-from app.core.config import CHROMA_DIR, load_config, ensure_data_dirs
+from app.core.config import CHROMA_DIR, load_config, get_complete_config, ensure_data_dirs
 import chromadb
 from typing import List
 import logging
@@ -26,7 +26,7 @@ def _init_embedding_service():
     """初始化嵌入服务（懒加载）"""
     global _embedding_initialized
     if not _embedding_initialized:
-        cfg = load_config()
+        cfg = get_complete_config()
         mode = cfg.get("embedding_mode", "local")
         try:
             EmbeddingService.initialize(mode=mode, config=cfg)
