@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>JsonNode 组件测试</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, sans-serif;
+            padding: 40px;
+            background: #1a1a2e;
+            color: #eee;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        h1 {
+            margin-bottom: 30px;
+        }
+        .test-section {
+            background: #16213e;
+            padding: 20px;
+            border-radius: 12px;
+            margin-bottom: 20px;
+        }
+        .test-section h3 {
+            margin-top: 0;
+            color: #e94560;
+        }
+        .json-display-wrapper {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 13px;
+            line-height: 1.6;
+            background: #0f3460;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .json-display-wrapper > .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 8px 16px;
+            background: #1a1a2e;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+        .json-display-wrapper > .header .title {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: #0f4c75;
+            font-size: 12px;
+            font-weight: 600;
+        }
+        .json-display {
+            padding: 16px;
+            overflow-x: auto;
+        }
+        .json-node {
+            display: inline;
+        }
+        .json-key {
+            color: #9cdcfe;
+        }
+        .json-colon {
+            color: #d4d4d4;
+        }
+        .json-null {
+            color: #569cd6;
+        }
+        .json-boolean {
+            color: #569cd6;
+        }
+        .json-number {
+            color: #b5cea8;
+        }
+        .json-string {
+            color: #ce9178;
+        }
+        .json-bracket,
+        .json-brace {
+            color: #ffd700;
+            font-weight: 600;
+        }
+        .json-comma {
+            color: #d4d4d4;
+        }
+        .json-children {
+            display: block;
+        }
+        .json-item {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🧪 JsonNode 组件测试</h1>
+        
+        <div class="test-section">
+            <h3>测试数据 1：简单对象</h3>
+            <div id="test1"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>测试数据 2：arxiv-watcher 参数（实际场景）</h3>
+            <div id="test2"></div>
+        </div>
+        
+        <div class="test-section">
+            <h3>测试数据 3：嵌套对象</h3>
+            <div id="test3"></div>
+        </div>
+    </div>
+
+    <script>
+        // 模拟我们的 JsonNode 组件逻辑
+        function escapeString(str) {
+            if (typeof str !== 'string') {
+                str = String(str);
+            }
+            return str
+                .replace(/\\/g, '\\\\')
+                .replace(/"/g, '\\"')
+                .replace(/\n/g, '\\n')
+                .replace(/\r/g, '\\r')
+                .replace(/\t/g, '\\t');
+        }
+
+        function escapeKey(key) {
+            if (key === null || key === undefined) {
+                return '';
+            }
+            const keyStr = String(key);
+            if (/^[a-zA-Z_$][a-zA-Z0-9_$]*$/.test(keyStr)) {
+                return keyStr;
+            }
+            return `"${escapeString(keyStr)}"`;
+        }
+
+        function renderJson(value, keyName = null, depth = 0) {
+            let html = '';
+            const indent = 20;
+            
+            // 键名
+            if (keyName !== null) {
+                html += `<span class="json-key">${escapeKey(keyName)}</span>`;
+                html += `<span class="json-colon">: </span>`;
+            }
+
+            // 空值
+            if (value === null) {
+                html += `<span class="json-null">null</span>`;
+            }
+            // 布尔值
+            else if (typeof value === 'boolean') {
+                html += `<span class="json-boolean">${value ? 'true' : 'false'}</span>`;
+            }
+            // 数字
+            else if (typeof value === 'number') {
+                html += `<span class="json-number">${value}</span>`;
+            }
+            // 字符串
+            else if (typeof value === 'string') {
+                html += `<span class="json-string">"${escapeString(value)}"</span>`;
+            }
+            // 数组
+            else if (Array.isArray(value)) {
+                html += `<span class="json-bracket">[</span>`;
+                if (value.length > 0) {
+                    html += `<div class="json-children" style="margin-left: ${indent}px">`;
+                    value.forEach((item, index) => {
+                        html += `<div class="json-item">`;
+                        html += renderJson(item, null, depth + 1);
+                        if (index < value.length - 1) {
+                            html += `<span class="json-comma">,</span>`;
+                        }
+                        html += `</div>`;
+                    });
+                    html += `</div>`;
+                }
+                html += `<span class="json-bracket">]</span>`;
+            }
+            // 对象
+            else if (typeof value === 'object') {
+                const keys = Object.keys(value).sort();
+                html += `<span class="json-brace">{</span>`;
+                if (keys.length > 0) {
+                    html += `<div class="json-children" style="margin-left: ${indent}px">`;
+                    keys.forEach((key, index) => {
+                        html += `<div class="json-item">`;
+                        html += renderJson(value[key], key, depth + 1);
+                        if (index < keys.length - 1) {
+                            html += `<span class="json-comma">,</span>`;
+                        }
+                        html += `</div>`;
+                    });
+                    html += `</div>`;
+                }
+                html += `<span class="json-brace">}</span>`;
+            }
+
+            return html;
+        }
+
+        function renderJsonDisplay(containerId, data, title = 'JSON') {
+            const container = document.getElementById(containerId);
+            const html = `
+                <div class="json-display-wrapper">
+                    <div class="header">
+                        <div class="title">
+                            <span>data_object</span>
+                            <span>${title}</span>
+                        </div>
+                        <button>unfold_more</button>
+                    </div>
+                    <div class="json-display">
+                        ${renderJson(data)}
+                    </div>
+                </div>
+            `;
+            container.innerHTML = html;
+        }
+
+        // 测试1：简单对象
+        const testData1 = {
+            name: "test",
+            value: 123,
+            active: true
+        };
+
+        // 测试2：实际的 arxiv-watcher 参数
+        const testData2 = {
+            "query": "drone AND pan sharpening OR multispectral fusion OR image fusion",
+            "max_results": 5,
+            "count": 5
+        };
+
+        // 测试3：嵌套对象
+        const testData3 = {
+            "user": {
+                "name": "John",
+                "age": 30,
+                "address": {
+                    "city": "Beijing",
+                    "country": "China"
+                }
+            },
+            "tags": ["react", "vue", "angular"]
+        };
+
+        renderJsonDisplay('test1', testData1, '简单对象');
+        renderJsonDisplay('test2', testData2, 'arxiv-watcher 参数');
+        renderJsonDisplay('test3', testData3, '嵌套对象');
+
+        console.log('✅ JsonNode 测试完成！');
+        console.log('测试数据 2（实际场景）:', testData2);
+    </script>
+</body>
+</html>

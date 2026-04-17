@@ -868,10 +868,23 @@ const sendStream = async () => {
               messages.value[lastIndex].reactSteps = [...reactSteps.value]
               scrollToBottom()
             } else if (parsed.type === 'react_action') {
+              console.log('[DEBUG] Received react_action event:', parsed)
+              console.log('[DEBUG] react_action input type:', typeof parsed.input)
+              console.log('[DEBUG] react_action input:', parsed.input)
+              // 确保 input 是正确的格式
+              let actionInput = parsed.input
+              if (typeof actionInput === 'string') {
+                try {
+                  actionInput = JSON.parse(actionInput)
+                } catch (e) {
+                  console.log('[DEBUG] Failed to parse action input as JSON:', e)
+                }
+              }
+              console.log('[DEBUG] Processed action input:', actionInput, 'type:', typeof actionInput)
               reactSteps.value.push({
                 type: 'action',
                 name: parsed.name,
-                input: parsed.input,
+                input: actionInput,
                 timestamp: Date.now()
               })
               messages.value[lastIndex].reactSteps = [...reactSteps.value]

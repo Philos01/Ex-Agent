@@ -188,14 +188,21 @@ const displayedSteps = computed(() => {
 })
 
 const checkHasJson = (step) => {
+  console.log('[DEBUG] checkHasJson called for step:', step)
   if (step.type === 'action' && step.input) {
-    return typeof step.input === 'object'
+    const isObject = typeof step.input === 'object' && step.input !== null && !Array.isArray(step.input)
+    const isArray = Array.isArray(step.input)
+    console.log('[DEBUG] Action step - isObject:', isObject, 'isArray:', isArray, 'input:', step.input)
+    return isObject || isArray
   }
   if (step.type === 'observation' && step.content) {
     const content = step.content
-    return (content.trim().startsWith('{') || content.trim().startsWith('[')) && 
-           (content.trim().endsWith('}') || content.trim().endsWith(']'))
+    const isJsonStr = (content.trim().startsWith('{') || content.trim().startsWith('[')) && 
+                      (content.trim().endsWith('}') || content.trim().endsWith(']'))
+    console.log('[DEBUG] Observation step - isJsonStr:', isJsonStr, 'content:', content.substring(0, 50))
+    return isJsonStr
   }
+  console.log('[DEBUG] No JSON for step')
   return false
 }
 

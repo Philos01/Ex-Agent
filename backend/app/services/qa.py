@@ -285,7 +285,10 @@ def _stream_answer_react(question: str, provider: str = "openai", messages: List
         if event_type == "thought":
             yield {"type": "react_thought", "content": event.get("content")}
         elif event_type == "action":
-            yield {"type": "react_action", "name": event.get("name"), "input": event.get("input")}
+            action_name = event.get("name")
+            action_input = event.get("input")
+            print(f"[DEBUG _stream_answer_react] Action event: name={action_name}, input_type={type(action_input)}, input={action_input}")
+            yield {"type": "react_action", "name": action_name, "input": action_input}
         elif event_type == "observation":
             yield {"type": "react_observation", "content": event.get("content")}
         elif event_type == "final_answer":
