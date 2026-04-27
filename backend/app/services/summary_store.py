@@ -51,24 +51,14 @@ class SummaryStore:
         return self.summary_dir / f"{filename_hash}.json"
     
     def save_summary(self, summary: DocumentSummary) -> bool:
-        """
-        保存文档摘要
-        
-        Args:
-            summary: DocumentSummary对象
-            
-        Returns:
-            是否保存成功
-        """
         try:
             summary_file = self._get_summary_file_path(summary.filename)
             
-            # 保存摘要
             with open(summary_file, 'w', encoding='utf-8') as f:
                 json.dump(summary.to_dict(), f, ensure_ascii=False, indent=2)
             
-            # 更新索引
-            self.index[summary.filename] = str(summary_file)
+            relative_path = str(summary_file.relative_to(self.summary_dir))
+            self.index[summary.filename] = relative_path
             self._save_index()
             
             logger.info(f"摘要保存成功: {summary.filename}")
@@ -80,20 +70,14 @@ class SummaryStore:
             return False
     
     def get_summary(self, filename: str) -> Optional[DocumentSummary]:
-        """
-        获取文档摘要
-        
-        Args:
-            filename: 文件名
-            
-        Returns:
-            DocumentSummary对象，如果不存在则返回None
-        """
         try:
             if filename not in self.index:
                 return None
             
-            summary_file = Path(self.index[filename])
+            stored_path = self.index[filename]
+            summary_file = Path(stored_path)
+            if not summary_file.is_absolute():
+                summary_file = self.summary_dir / summary_file
             if not summary_file.exists():
                 return None
             
@@ -106,20 +90,14 @@ class SummaryStore:
             return None
     
     def delete_summary(self, filename: str) -> bool:
-        """
-        删除文档摘要
-        
-        Args:
-            filename: 文件名
-            
-        Returns:
-            是否删除成功
-        """
         try:
             if filename not in self.index:
                 return True
             
-            summary_file = Path(self.index[filename])
+            stored_path = self.index[filename]
+            summary_file = Path(stored_path)
+            if not summary_file.is_absolute():
+                summary_file = self.summary_dir / summary_file
             if summary_file.exists():
                 summary_file.unlink()
             

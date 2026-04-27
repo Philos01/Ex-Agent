@@ -2,6 +2,9 @@ import os
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from app.core.config import get_complete_config
+
 
 def docx_to_markdown(docx_path: str, output_dir: str = None):
     """
@@ -15,7 +18,13 @@ def docx_to_markdown(docx_path: str, output_dir: str = None):
         output_dir = os.path.dirname(docx_path)
     
     os.makedirs(output_dir, exist_ok=True)
-    
+
+    cfg = get_complete_config()
+    docx_timeout = (
+        cfg.get("timeouts", {}).get("docx2markdown_subprocess", 300)
+        if cfg.get("timeouts", {}).get("enabled", True) else None
+    )
+
     base_name = os.path.splitext(os.path.basename(docx_path))[0]
     output_path = os.path.join(output_dir, f"{base_name}.md")
     file_ext = os.path.splitext(docx_path)[1].lower()
@@ -146,7 +155,7 @@ def docx_to_markdown(docx_path: str, output_dir: str = None):
                         ["antiword", docx_path],
                         capture_output=True,
                         text=True,
-                        timeout=300
+                        timeout=docx_timeout
                     )
                     
                     if result.returncode == 0:
@@ -179,7 +188,7 @@ def docx_to_markdown(docx_path: str, output_dir: str = None):
                 ["pandoc", docx_path, "-o", output_path, "--wrap=none"],
                 capture_output=True,
                 text=True,
-                timeout=300
+                timeout=docx_timeout
             )
             
             if result.returncode == 0:

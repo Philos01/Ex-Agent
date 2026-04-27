@@ -9,6 +9,7 @@ import json
 import os
 from pathlib import Path
 import logging
+from app.core.config import get_complete_config
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,7 @@ class SkillExecutor:
         self.skill_dir = Path(skill_dir)
         self.scripts_dir = self.skill_dir / "scripts"
         self.config = self._load_skill_config()
+        self.cfg = get_complete_config()
     
     def _load_skill_config(self):
         """
@@ -136,7 +138,8 @@ class SkillExecutor:
                     text=True,
                     encoding='utf-8',
                     errors='replace',
-                    timeout=60,
+                    timeout=self.cfg.get("timeouts", {}).get("skill_executor_python", 60)
+                    if self.cfg.get("timeouts", {}).get("enabled", True) else None,
                     cwd=str(self.skill_dir)
                 )
                 
@@ -227,7 +230,8 @@ class SkillExecutor:
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=60,
+                timeout=self.cfg.get("timeouts", {}).get("skill_executor_shell", 60)
+                if self.cfg.get("timeouts", {}).get("enabled", True) else None,
                 cwd=str(self.skill_dir),
                 env=env
             )

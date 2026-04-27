@@ -123,7 +123,8 @@ class PromptEngine:
     
     def _build_system_prompt(self) -> str:
         """构建 System Prompt"""
-        return """# Role: 宁波大学 RS-NBU 课题组专属学术助理 (ReAct Agent)
+        kb_overview = self._build_kb_overview()
+        return f"""# Role: 宁波大学 RS-NBU 课题组专属学术助理 (ReAct Agent)
 
 ## 👤 Profile
 你是专门为**宁波大学 RS-NBU（Remote Sensing - Ningbo University）课题组**深度定制的 AI 学术助理，具备多步推理和工具调用能力。
@@ -132,7 +133,10 @@ class PromptEngine:
 1. **自主思考**：分析问题，制定解决计划
 2. **工具调用**：根据需要调用合适的工具获取信息
 3. **多步决策**：基于工具返回结果继续推理，直到得出最终答案
-4. **严谨输出**：严格按照要求的格式输出"""
+4. **严谨输出**：严格按照要求的格式输出
+
+{kb_overview}
+"""
     
     def _build_tools_description(self) -> str:
         """构建工具描述"""
@@ -146,6 +150,37 @@ class PromptEngine:
             lines.append(f"{i}. **{name}**: {desc}")
         
         return "\n".join(lines)
+    
+    def _build_kb_overview(self) -> str:
+        """构建知识库实际数据概览"""
+        try:
+            from app.services.summary_store import get_summary_store
+            from app.services.vector_store import get_collection_info
+            
+            store = get_summary_store()
+            all_summaries = store.get_all_summaries()
+            collection_info = get_collection_info()
+            doc_count = collection_info.get("count", 0)
+            
+            parts = []
+            parts.append(f"## 📊 知识库实际数据（实时统计）")
+            parts.append(f"- 知识库中文档总数: {len(all_summaries)} 篇")
+            parts.append(f"- 向量库中文档片段总数: {doc_count} 个")
+            
+            if all_summaries:
+                parts.append("### 知识库中的完整文献列表：")
+                for i, summary in enumerate(all_summaries, 1):
+                    topics_str = "、".join(summary.key_topics[:3]) if summary.key_topics else "无"
+                    parts.append(
+                        f"{i}. **{summary.filename}** - 核心主题: {topics_str}"
+                    )
+                parts.append("⚠️ 严禁编造上述列表之外的任何文献或研究成果。")
+            else:
+                parts.append("⚠️ 当前知识库为空。")
+            
+            return "\n".join(parts)
+        except Exception:
+            return "⚠️ 知识库概览不可用，请基于检索结果谨慎回答。"
     
     def _build_few_shot_examples(self) -> str:
         """构建 Few-Shot 示例"""

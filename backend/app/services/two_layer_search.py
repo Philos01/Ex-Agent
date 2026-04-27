@@ -137,13 +137,18 @@ class TwoLayerRetriever:
             summary_texts = []
             summary_metas = []
             for summary in all_summaries:
-                # 组合摘要的所有信息
                 summary_text = f"标题: {summary.filename}\n"
                 summary_text += f"摘要: {summary.summary}\n"
                 summary_text += f"主题: {', '.join(summary.key_topics)}\n"
                 summary_text += f"要点: {', '.join(summary.key_points)}\n"
                 summary_text += f"结论: {', '.join(summary.main_conclusions)}\n"
-                summary_text += f"术语: {', '.join(summary.technical_terms)}"
+                summary_text += f"术语: {', '.join(summary.technical_terms)}\n"
+                if hasattr(summary, 'authors') and summary.authors:
+                    summary_text += f"作者: {', '.join(summary.authors)}\n"
+                if hasattr(summary, 'publication_year') and summary.publication_year:
+                    summary_text += f"发表年份: {summary.publication_year}\n"
+                if hasattr(summary, 'venue') and summary.venue:
+                    summary_text += f"期刊/会议: {summary.venue}\n"
                 
                 summary_texts.append(summary_text)
                 summary_metas.append({

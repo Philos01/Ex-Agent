@@ -126,7 +126,6 @@ gunicorn app.main:app \
     --workers 4 \
     --worker-class uvicorn.workers.UvicornWorker \
     --bind 0.0.0.0:8000 \
-    --timeout 600 \
     --access-logfile /var/log/lab_agent/access.log \
     --error-logfile /var/log/lab_agent/error.log
 ```
@@ -148,8 +147,7 @@ Environment="PATH=/path/to/backend/.venv/bin"
 ExecStart=/path/to/backend/.venv/bin/gunicorn app.main:app \
     --workers 4 \
     --worker-class uvicorn.workers.UvicornWorker \
-    --bind 127.0.0.1:8000 \
-    --timeout 600
+    --bind 127.0.0.1:8000
 Restart=always
 
 [Install]
@@ -202,11 +200,6 @@ server {
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
         proxy_set_header Connection "upgrade";
-        
-        # 超时设置
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 600s;
-        proxy_read_timeout 600s;
     }
 
     # 静态资源缓存
@@ -303,7 +296,7 @@ RUN mkdir -p /app/data
 EXPOSE 8000
 
 # 健康检查
-HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+HEALTHCHECK --interval=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ || exit 1
 
 # 启动命令
@@ -435,7 +428,6 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 600s;
     }
 
     # 限流配置

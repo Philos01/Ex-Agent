@@ -52,6 +52,13 @@ def extract_text(path: str) -> str:
 def split_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
     if not text:
         return []
+    
+    sections = _split_by_sections(text)
+    if sections and len(sections) > 1:
+        chunks = _merge_sections_to_chunks(sections, chunk_size, chunk_overlap)
+        if chunks:
+            return chunks
+    
     chunks = []
     step = chunk_size - chunk_overlap
     if step <= 0:
@@ -59,6 +66,97 @@ def split_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> L
     for i in range(0, len(text), step):
         chunk = text[i : i + chunk_size]
         chunks.append(chunk)
+    return chunks
+
+
+def _split_by_sections(text: str) -> List[dict]:
+    """
+    按论文章节结构拆分文本，保留章节标题信息
+    
+    Returns:
+        章节列表，每个元素包含 title 和 content
+    """
+    import re
+    
+    section_patterns = [
+        r'^\s*(\d+\.?\s+[A-Z][a-zA-Z\s,:\-]+)',
+        r'^\s*(Abstract|Introduction|Related Work|Method|Methodology|Experiment|Results|Discussion|Conclusion|References|Acknowledgment)',
+        r'^\s*(摘要|引言|相关工作|方法|实验|结果|讨论|结论|参考文献|致谢)',
+        r'^\s*(\d+\.\d+\s+.+)',
+    ]
+    
+    combined_pattern = '|'.join(f'({p})' for p in section_patterns)
+    
+    lines = text.split('\n')
+    sections = []
+    current_title = ""
+    current_content = []
+    
+    for line in lines:
+        is_section_header = False
+        for pattern in section_patterns:
+            if re.match(pattern, line.strip()) and len(line.strip()) < 100:
+                is_section_header = True
+                break
+        
+        if is_section_header and current_content:
+            sections.append({
+                "title": current_title,
+                "content": "\n".join(current_content).strip()
+            })
+            current_title = line.strip()
+            current_content = []
+        elif is_section_header:
+            current_title = line.strip()
+        else:
+            current_content.append(line)
+    
+    if current_content:
+        sections.append({
+            "title": current_title,
+            "content": "\n".join(current_content).strip()
+        })
+    
+    return sections
+
+
+def _merge_sections_to_chunks(sections: List[dict], chunk_size: int, chunk_overlap: int) -> List[str]:
+    """
+    将章节合并为合适大小的chunks，保留章节标题上下文
+    """
+    chunks = []
+    current_chunk = ""
+    
+    for section in sections:
+        title = section["title"]
+        content = section["content"]
+        
+        section_text = f"[{title}]\n{content}" if title else content
+        
+        if len(current_chunk) + len(section_text) + 2 <= chunk_size:
+            if current_chunk:
+                current_chunk += "\n\n" + section_text
+            else:
+                current_chunk = section_text
+        else:
+            if current_chunk:
+                chunks.append(current_chunk)
+            
+            if len(section_text) <= chunk_size:
+                current_chunk = section_text
+            else:
+                step = chunk_size - chunk_overlap
+                if step <= 0:
+                    step = chunk_size
+                for i in range(0, len(section_text), step):
+                    chunk_part = section_text[i : i + chunk_size]
+                    if chunk_part.strip():
+                        chunks.append(chunk_part)
+                current_chunk = ""
+    
+    if current_chunk:
+        chunks.append(current_chunk)
+    
     return chunks
 
 
@@ -93,9 +191,8 @@ def generate_and_save_summary(
         
         logger.info(f"开始生成文件摘要: {filename}")
         
-        # 生成摘要
         summary = generate_document_summary(file_text, filename, provider)
-        summary.file_path = file_path
+        summary.file_path = os.path.relpath(file_path, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
         
         # 保存摘要
         success = save_document_summary(summary)
@@ -149,7 +246,9 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
         metas.append({
             "source": filename,
             "chunk_index": i,
+            "total_chunks": len(chunks),
             "ingest_time": datetime.datetime.utcnow().isoformat(),
+            "file_type": os.path.splitext(path)[1].lower(),
         })
         ids.append(str(uuid4()))
     if chunks:

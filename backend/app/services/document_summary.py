@@ -22,6 +22,9 @@ class DocumentSummary:
         self.key_points: list = []
         self.main_conclusions: list = []
         self.technical_terms: list = []
+        self.authors: list = []
+        self.publication_year: str = ""
+        self.venue: str = ""
         self.quality_score: float = 0.0
         self.generated_at: str = ""
         self.file_path: str = ""
@@ -35,6 +38,9 @@ class DocumentSummary:
             "key_points": self.key_points,
             "main_conclusions": self.main_conclusions,
             "technical_terms": self.technical_terms,
+            "authors": self.authors,
+            "publication_year": self.publication_year,
+            "venue": self.venue,
             "quality_score": self.quality_score,
             "generated_at": self.generated_at,
             "file_path": self.file_path
@@ -50,6 +56,9 @@ class DocumentSummary:
         summary.key_points = data.get("key_points", [])
         summary.main_conclusions = data.get("main_conclusions", [])
         summary.technical_terms = data.get("technical_terms", [])
+        summary.authors = data.get("authors", [])
+        summary.publication_year = data.get("publication_year", "")
+        summary.venue = data.get("venue", "")
         summary.quality_score = data.get("quality_score", 0.0)
         summary.generated_at = data.get("generated_at", "")
         summary.file_path = data.get("file_path", "")
@@ -92,24 +101,28 @@ class DocumentSummarizer:
         logger.info(f"开始生成文档摘要: {filename}")
         
         # 构建提示词
-        system_prompt = """你是一个专业的文档分析专家，专门用于分析和总结知识库中的文档。
+        system_prompt = """你是一个专业的学术文献分析专家，专门用于分析和总结知识库中的学术论文。
 
-你的任务是分析提供的文档内容，生成结构化的摘要，遵循以下要求：
+你的任务是分析提供的学术论文内容，生成结构化的摘要，遵循以下要求：
 
-1. 保持学术严谨性和准确性
-2. 提取文档的核心主题
-3. 列出关键要点（3-5条）
+1. 保持学术严谨性和准确性，所有内容必须严格基于提供的文档
+2. 提取论文的核心研究主题
+3. 列出关键要点（3-5条），包括方法创新点和实验结论
 4. 总结主要结论（2-3条）
-5. 提取文档中出现的重要技术术语
-6. 所有内容必须基于提供的文档，不要添加外部知识
+5. 提取论文中出现的重要技术术语和方法名称
+6. 如果能识别，请提取论文的作者信息、发表年份和期刊/会议信息
+7. 绝不编造文档中未提及的任何信息
 
 请以JSON格式输出，包含以下字段：
 {
-  "summary": "文档的简要总结（100-200字）",
+  "summary": "论文的简要总结（100-200字），包含研究问题、方法和主要结论",
   "key_topics": ["核心主题1", "核心主题2"],
   "key_points": ["关键要点1", "关键要点2", "关键要点3"],
   "main_conclusions": ["主要结论1", "主要结论2"],
   "technical_terms": ["术语1", "术语2"],
+  "authors": ["作者1", "作者2"],
+  "publication_year": "发表年份（如无法确定则为空字符串）",
+  "venue": "发表期刊或会议名称（如无法确定则为空字符串）",
   "quality_score": 0.9
 }
 
@@ -117,6 +130,8 @@ class DocumentSummarizer:
 - 摘要的准确性
 - 信息的完整性
 - 结构的清晰度
+
+重要：authors、publication_year、venue 字段必须从文档内容中提取，如果文档中没有明确提及，请留空字符串，绝不可猜测或编造。
 """
 
         # 限制文本长度，避免token超限
@@ -146,6 +161,9 @@ class DocumentSummarizer:
                     doc_summary.key_points = data.get("key_points", [])
                     doc_summary.main_conclusions = data.get("main_conclusions", [])
                     doc_summary.technical_terms = data.get("technical_terms", [])
+                    doc_summary.authors = data.get("authors", [])
+                    doc_summary.publication_year = data.get("publication_year", "")
+                    doc_summary.venue = data.get("venue", "")
                     doc_summary.quality_score = data.get("quality_score", 0.5)
                 except json.JSONDecodeError as e:
                     logger.error(f"解析JSON失败: {e}")
@@ -213,7 +231,8 @@ class DocumentSummarizer:
                         "num_predict": 2000
                     }
                 },
-                timeout=300
+                timeout=self.cfg.get("timeouts", {}).get("document_summary", 300)
+                if self.cfg.get("timeouts", {}).get("enabled", True) else None
             )
             r.raise_for_status()
             

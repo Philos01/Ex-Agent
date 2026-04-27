@@ -1,0 +1,45 @@
+{
+  "filename": "研三-罗敏超-无人机小目标检测-TGRS.md",
+  "summary": "本文针对无人机(UAV)高空拍摄中小目标检测面临的挑战，提出了一种名为IM-CMDet的可见光-红外(RGBT)图像小目标检测网络。该网络通过三个模块——细节语义联合增强(DSJE)、基于差异的融合权重生成(DFWG)和特征重构网络(FRN)——有效提升了小目标特征表达，解决了多模态间的空间错位问题，并增强了对小目标的敏感性。实验结果表明，IM-CMDet在多个公开数据集上实现了先进的检测性能，显著提升了复杂空中场景下的小目标检测效果。",
+  "key_topics": [
+    "无人机小目标检测",
+    "可见光-红外多模态融合",
+    "跨模态特征融合",
+    "小目标特征增强"
+  ],
+  "key_points": [
+    "提出DSJE模块，通过多层次特征优化防止小目标特征被背景噪声淹没。",
+    "设计FRN模块，基于Swin-Transformer架构克服模态差异，构建跨模态信息关联。",
+    "引入DFWG模块，结合差异和空间注意力生成融合权重，提升对小目标的敏感性并抑制背景干扰。",
+    "通过在RGBTDronePerson及其他两个基准数据集上的广泛实验，验证了IM-CMDet的优越性能。",
+    "系统分析了现有多模态融合方法的不足，特别是空间错位对检测性能的影响。"
+  ],
+  "main_conclusions": [
+    "IM-CMDet通过有效的跨模态融合显著提升了无人机小目标检测的准确性和鲁棒性。",
+    "细节语义增强和差异加权机制对提升小目标特征表达和抑制背景噪声起到了关键作用。",
+    "基于Transformer的特征重构网络有效缓解了模态间的空间错位问题，增强了多模态信息的互补利用。"
+  ],
+  "technical_terms": [
+    "IM-CMDet",
+    "细节语义联合增强(DSJE)",
+    "基于差异的融合权重生成(DFWG)",
+    "特征重构网络(FRN)",
+    "Swin-Transformer",
+    "跨模态融合",
+    "RGB-thermal (RGBT)图像",
+    "空间注意力机制"
+  ],
+  "authors": [
+    "Minchao Luo",
+    "Rui Zhao",
+    "Shenfu Zhang",
+    "Liang Chen",
+    "Feng Shao",
+    "Xiangchao Meng"
+  ],
+  "publication_year": "2025",
+  "venue": "IEEE Transactions on Geoscience and Remote Sensing (TGRS)",
+  "quality_score": 0.95,
+  "generated_at": "2026-04-27T11:41:43.323397",
+  "file_path": "data\\uploads\\研三-罗敏超-无人机小目标检测-TGRS.md"
+}

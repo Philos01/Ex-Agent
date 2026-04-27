@@ -176,6 +176,7 @@ You are a skill selector for an AI assistant. Your task is to analyze the user's
 - Extract parameters directly from the question
 - If no skill matches, set "should_use_skill" to false and "skill_name" to null
 - Be conservative - only use skills when they are clearly relevant
+- **CRITICAL: Do NOT use any skill when the user asks about "our group" (我们组), "research group" (课题组), or internal documents/papers. These questions should be answered using internal RAG retrieval, not external skills.**
 - Output only the JSON, no other text
 """
         

@@ -21,6 +21,62 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _build_knowledge_base_overview() -> str:
+    """
+    构建知识库实际元数据概览，注入到prompt中防止LLM幻觉
+    
+    Returns:
+        知识库概览文本
+    """
+    overview_parts = []
+    
+    try:
+        from app.services.summary_store import get_summary_store
+        from app.services.vector_store import get_collection_info
+        
+        store = get_summary_store()
+        all_summaries = store.get_all_summaries()
+        
+        collection_info = get_collection_info()
+        doc_count = collection_info.get("count", 0)
+        
+        overview_parts.append(f"## 📊 知识库实际数据（实时统计，请严格依据此数据回答）")
+        overview_parts.append(f"- 知识库中文档总数: {len(all_summaries)} 篇")
+        overview_parts.append(f"- 向量库中文档片段总数: {doc_count} 个")
+        overview_parts.append("")
+        
+        if all_summaries:
+            overview_parts.append("### 知识库中的完整文献列表：")
+            for i, summary in enumerate(all_summaries, 1):
+                topics_str = "、".join(summary.key_topics[:3]) if summary.key_topics else "无"
+                author_info = ""
+                if hasattr(summary, 'authors') and summary.authors:
+                    author_info = f"\n   - 作者: {', '.join(summary.authors[:5])}"
+                pub_info = ""
+                if hasattr(summary, 'publication_year') and summary.publication_year:
+                    pub_info = f"\n   - 发表年份: {summary.publication_year}"
+                if hasattr(summary, 'venue') and summary.venue:
+                    pub_info += f"\n   - 期刊/会议: {summary.venue}"
+                overview_parts.append(
+                    f"{i}. **{summary.filename}**\n"
+                    f"   - 摘要: {summary.summary[:150]}{'...' if len(summary.summary) > 150 else ''}\n"
+                    f"   - 核心主题: {topics_str}"
+                    f"{author_info}{pub_info}"
+                )
+            overview_parts.append("")
+            overview_parts.append("⚠️ **严禁编造上述列表之外的任何文献、作者或研究成果。**")
+            overview_parts.append("⚠️ **当用户询问组内文献数量时，必须回答「知识库中目前有 "
+                                  f"{len(all_summaries)} 篇文献」，不得给出其他数字。**")
+        else:
+            overview_parts.append("⚠️ **当前知识库为空，没有任何文献。如用户询问组内文献，请明确告知知识库暂无数据。**")
+        
+    except Exception as e:
+        logger.error(f"构建知识库概览失败: {e}")
+        overview_parts.append("⚠️ 知识库概览生成失败，请基于检索到的上下文谨慎回答。")
+    
+    return "\n".join(overview_parts)
+
+
 def regularize_output(text: str) -> str:
     """
     正则化处理LLM输出，提升可读性
@@ -165,6 +221,9 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
         conversation_history += "\n"
     
     context = "\n\n".join([d.get("text", "") for d in docs])
+    
+    kb_overview = _build_knowledge_base_overview()
+    
     prompt = f"""
     # Role: 宁波大学 RS-NBU 课题组专属学术助理
 
@@ -175,6 +234,10 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
     - **当前日期**：{current_date_str}
     - **当前年份**：{current_year}年
     请注意：这是真实的当前时间，你需要基于这个时间信息回答用户关于时间、年份的问题。
+
+    ---
+
+    {kb_overview}
 
     ---
 
@@ -195,6 +258,7 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
 
     ## 🚫 约束
     1. **使用正确的时间**：必须基于上面提供的当前时间信息（{current_date_str}，{current_year}年）回答问题，不要使用你训练数据中的截止日期。
+    2. **严格依据知识库实际数据**：关于组内文献数量、作者、研究成果等事实性问题，必须且只能依据上方「知识库实际数据」部分提供的信息回答，绝不可凭空编造或推测。
 
     ## 请根据上下文回答问题，并给出引用来源：
     """
@@ -202,7 +266,8 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
         # simple HTTP call to Ollama generation endpoint (用户需自行配置 Ollama)
         try:
             endpoint = cfg.get("ollama_url").rstrip("/") + "/api/generate"
-            r = requests.post(endpoint, json={"model": cfg.get("ollama_model"), "prompt": prompt}, timeout=60)
+            r = requests.post(endpoint, json={"model": cfg.get("ollama_model"), "prompt": prompt},
+                             timeout=cfg.get("timeouts", {}).get("requests_post", 60) if cfg.get("timeouts", {}).get("enabled", True) else None)
             r.raise_for_status()
             text = r.json().get("response", "")
         except Exception as e:
@@ -494,6 +559,8 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 请仔细阅读技能结果，现在开始生成你的回答。
 """
     else:
+        kb_overview = _build_knowledge_base_overview()
+        
         # 正常 RAG 模式的 prompt
         prompt = f"""
 # Role: 宁波大学 RS-NBU 课题组专属学术助理 (RS-NBU Academic AI Assistant)
@@ -513,6 +580,10 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 - 图像质量评估（PSNR, SSIM, SAM, ERGAS, Q8, SCC 等指标）
 - 遥感下游应用（变化检测、目标检测、地物分类、语义分割等）
 - 课题组内部传承的预处理流、配准方法与私有数据集规范
+
+---
+
+{kb_overview}
 
 ---
 
@@ -552,10 +623,11 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 - **触发条件**：问题涉及具体的算法细节、论文出处、历年实验数据、组内规范等，或用户询问“我们组做过什么”、“组内关于XX的研究”等针对课题组的情况。
 - **执行动作**：
   1. **明确资料属性**：请深刻认知，除明确标记为“外部搜索结果”外，`<retrieved_context>` 中的所有内容**均100%属于 RS-NBU 课题组的内部专属资料**。任何关于组内历史、研究成果、代码、数据的咨询，都请直接且自信地从这些检索内容中提取答案。
-  2. **绝对忠诚**：严格基于 `<retrieved_context>` 提供的信息作答，禁止凭空捏造组内未做过的研究。
-  3. **溯源引用**：在每个关键结论或数据后，必须以学术规范标注来源。格式示例：`[引用: 2023_张三_TGRS论文.pdf]` 或 `[引用: 20240312_组会记录]`。
+  2. **绝对忠诚**：严格基于 `<retrieved_context>` 和上方「知识库实际数据」提供的信息作答，禁止凭空捏造组内未做过的研究。
+  3. **溯源引用**：在每个关键结论或数据后，必须以学术规范标注来源。格式示例：`[引用: 文件名.pdf]`。
   4. **结构化输出**：如果是询问算法对比或实验步骤，请用 Markdown 表格或有序列表呈现。
   5. **信息不足处理**：如果检索到的组内资料不全，请明确告知："根据目前的检索，组内资料库中关于该问题的记录仅包含以下信息..."，然后无缝切换至【优先级 4】补充通用学术知识。
+  6. **文献统计必须准确**：当用户询问组内文献数量时，必须依据上方「知识库实际数据」中的文档总数回答，绝不可编造或估算。
 
 ### 🔵 优先级 4：遥感领域专业探讨 (Domain Expert Mode)
 - **触发条件**：用户询问宽泛的学术概念、前沿趋势、代码 Bug 排查，且 `<retrieved_context>` 中无直接答案。
@@ -574,7 +646,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
 
 ## 🚫 全局安全与格式约束 (Strict Constraints)
 1. **组内资料绝对信任（Internal KB Priority）**：请牢记，`<retrieved_context>` 中未标记为外部搜索的内容，即代表了 RS-NBU 课题组的全部已知内部情况。当用户询问“课题组/我们组”相关问题时，请直接将其等同于对检索内容的查询，不得怀疑资料的归属性。
-2. **防幻觉（Zero Hallucination）**：绝不编造课题组未发表的论文、未取得的指标（如捏造某算法在某数据集上达到了 0.99 的 SSIM）。不知道就回答"组内资料暂无记载"。
+2. **防幻觉（Zero Hallucination）**：绝不编造课题组未发表的论文、未取得的指标（如捏造某算法在某数据集上达到了 0.99 的 SSIM）。不知道就回答"组内资料暂无记载"。关于文献数量、作者、发表年份等事实性信息，必须严格依据上方「知识库实际数据」部分，不得推测或编造。
 3. **知识隔离**：如果用户的提问同时涉及内部资料和外部常识，请明确区分"课题组内部资料显示..."与"学术界通常认为..."与"ArXiv 最新论文显示..."。
 4. **Markdown 优先**：复杂的数学公式必须严格使用 LaTeX 语法；代码必须有完整的注释；对比内容优先使用表格。
 5. **上下文连贯**：作答前必须参考 `<conversation_history>`，避免重复回答或语境断裂。
@@ -685,7 +757,8 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                     "stream": True,
                     "options": ollama_options,
                     "think": et  # 启用thinking阶段输出（如果模型支持）
-                }, stream=True, timeout=60)
+                }, stream=True,
+                timeout=cfg.get("timeouts", {}).get("requests_stream", 60) if cfg.get("timeouts", {}).get("enabled", True) else None)
                 r.raise_for_status()
                 
                 in_thinking = False

@@ -1,6 +1,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 from typing import List, Optional
 import os
+import sys
 import json
 import subprocess
 import datetime
@@ -105,32 +106,27 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 
                 # 2. 根据文件类型选择转换脚本
                 if file_ext == ".pdf":
-                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "pdf2markdown.py")
+                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "pdf2markdown.py")
                 else:
-                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "docx2markdown.py")
+                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "docx2markdown.py")
                 
                 # 使用专门的临时输出目录
                 temp_output_dir = os.path.join(os.path.dirname(temp_path), "convert_temp")
                 os.makedirs(temp_output_dir, exist_ok=True)
                 
                 print(f"[DEBUG] 运行转换脚本: {script_path}")
-                
-                # 使用虚拟环境中的python解释器
-                python_exe = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", ".venv", "Scripts", "python.exe")
+                python_exe = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", ".venv", "Scripts", "python.exe")
                 if not os.path.exists(python_exe):
-                    python_exe = "python"
+                    python_exe = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", ".venv", "bin", "python")
+                if not os.path.exists(python_exe):
+                    python_exe = sys.executable
                 
-                # 运行转换脚本，这次捕获输出以便显示错误
+                # 运行转换脚本（输出直接显示在终端，便于调试）
                 result = subprocess.run(
-                    [python_exe, script_path, temp_path, temp_output_dir],
-                    capture_output=True,
-                    text=True,
-                    timeout=600
+                    [python_exe, script_path, temp_path, temp_output_dir]
                 )
                 
                 print(f"[DEBUG] 转换完成，返回码: {result.returncode}")
-                if result.stderr:
-                    print(f"[DEBUG] 转换输出: {result.stderr}")
                 
                 # 3. 查找转换后的Markdown文件
                 base_name = os.path.splitext(os.path.basename(temp_path))[0]

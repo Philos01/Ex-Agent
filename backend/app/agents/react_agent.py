@@ -605,7 +605,8 @@ class ReActAgent:
                                 "num_predict": mt
                             }
                         },
-                        timeout=60
+                        timeout=self.cfg.get("timeouts", {}).get("react_agent_subprocess", 60)
+                        if self.cfg.get("timeouts", {}).get("enabled", True) else None
                     )
                     r.raise_for_status()
                     return r.json().get("response", "")

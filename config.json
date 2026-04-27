@@ -62,5 +62,5 @@
     "timeout": 60,
     "max_retries": 3
   },
-  "allow_pdf_conversion": false
+  "allow_pdf_conversion": true
 }

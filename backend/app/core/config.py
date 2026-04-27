@@ -120,6 +120,16 @@ DEFAULT_CONFIG: Dict = {
         "max_history_rounds": 5,
         "exclude_error_messages": True,
         "exclude_questionable_messages": False
+    },
+    "timeouts": {
+        "enabled": True,
+        "requests_post": 60,
+        "requests_stream": 60,
+        "document_summary": 300,
+        "skill_executor_python": 60,
+        "skill_executor_shell": 60,
+        "react_agent_subprocess": 60,
+        "docx2markdown_subprocess": 300
     }
 }
 
