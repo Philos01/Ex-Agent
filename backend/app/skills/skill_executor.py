@@ -138,8 +138,10 @@ class SkillExecutor:
                     text=True,
                     encoding='utf-8',
                     errors='replace',
-                    timeout=self.cfg.get("timeouts", {}).get("skill_executor_python", 60)
-                    if self.cfg.get("timeouts", {}).get("enabled", True) else None,
+                    timeout=min(
+                        self.cfg.get("timeouts", {}).get("skill_executor_python", 60) or 60,
+                        120
+                    ),
                     cwd=str(self.skill_dir)
                 )
                 
@@ -216,11 +218,16 @@ class SkillExecutor:
             else:
                 cmd = [str(script_path)]
             
-            # Configurable argument passing
             if self.config.get("shell_pass_query_as_arg", True):
                 query_param_name = self.config.get("shell_query_param_name", "query")
                 if query_param_name in params:
                     cmd.append(str(params[query_param_name]))
+            
+            all_params_arg = self.config.get("shell_pass_all_params_as_args", True)
+            if all_params_arg:
+                for key, value in params.items():
+                    if key != query_param_name:
+                        cmd.append(str(value))
             
             logger.info("[SkillExecutor] Executing Shell: {}".format(' '.join(cmd)))
             
@@ -230,8 +237,10 @@ class SkillExecutor:
                 text=True,
                 encoding='utf-8',
                 errors='replace',
-                timeout=self.cfg.get("timeouts", {}).get("skill_executor_shell", 60)
-                if self.cfg.get("timeouts", {}).get("enabled", True) else None,
+                timeout=min(
+                    self.cfg.get("timeouts", {}).get("skill_executor_shell", 60) or 60,
+                    120
+                ),
                 cwd=str(self.skill_dir),
                 env=env
             )

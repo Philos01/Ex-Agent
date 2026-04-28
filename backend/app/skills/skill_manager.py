@@ -212,13 +212,14 @@ class SkillManager:
         Args:
             skill_name: Skill name
             **kwargs: Skill parameters
-            
+
         Returns:
             Execution result dictionary
         """
         logger.info("[SkillManager] Executing skill: {}, params: {}".format(skill_name, kwargs))
         
-        # Try package skill first
+        kwargs = self._normalize_params(skill_name, kwargs)
+        
         skill_dir = self.skill_selector.get_skill_dir(skill_name)
         if skill_dir:
             logger.info("[SkillManager] Using package skill: {}".format(skill_name))
@@ -245,6 +246,27 @@ class SkillManager:
             "success": False,
             "error": "Skill not found: {}".format(skill_name)
         }
+    
+    def _normalize_params(self, skill_name, params):
+        """Normalize skill parameters with common alias mappings"""
+        if not params:
+            return params
+        normalized = dict(params)
+        
+        if skill_name == "amap-weather":
+            if "location" in normalized and "city" not in normalized:
+                normalized["city"] = normalized["location"]
+        
+        elif skill_name == "arxiv-watcher":
+            if "search_query" in normalized and "query" not in normalized:
+                normalized["query"] = normalized["search_query"]
+            if "max_results" in normalized and "count" not in normalized:
+                try:
+                    normalized["count"] = int(normalized["max_results"])
+                except (ValueError, TypeError):
+                    pass
+        
+        return normalized
     
     def format_skill_result(self, result):
         """

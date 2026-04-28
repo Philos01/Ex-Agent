@@ -6,6 +6,7 @@
 import logging
 import time
 from typing import List, Dict, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from app.core.config import load_config
 from app.services.vector_store import search as vector_search
 from app.services.bm25_search import get_bm25_retriever, refresh_bm25_index
@@ -96,8 +97,11 @@ class HybridSearchService:
                 return []
         
         # 2. 并行检索 BM2.5 和 向量
-        bm25_docs = self._search_bm25(rewritten_query, initial_count)
-        vector_docs = self._search_vector(rewritten_query, initial_count)
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            bm25_future = executor.submit(self._search_bm25, rewritten_query, initial_count)
+            vector_future = executor.submit(self._search_vector, rewritten_query, initial_count)
+            bm25_docs = bm25_future.result()
+            vector_docs = vector_future.result()
         
         # 3. 融合结果
         fused_docs = self._fuse_results(bm25_docs, vector_docs, bm25_weight, embedding_weight, initial_count)
@@ -134,14 +138,14 @@ class HybridSearchService:
         """执行向量检索"""
         try:
             logger.info(f"[DEBUG] 向量检索使用查询: '{query}'")
-            docs = vector_search(query, top_k=top_k)
-            # Chroma 返回的是距离，转换为相似度分数 [0, 1]
-            # 距离越小越好，所以 1 - normalized_distance
-            for i, doc in enumerate(docs):
-                # 默认分数为位置权重
-                doc["score"] = 1.0 - (i / len(docs)) if docs else 0.5
-            logger.info(f"向量检索到 {len(docs)} 个结果")
-            return docs
+            from app.services.vector_store import search_with_distances
+            results = search_with_distances(query, top_k=top_k)
+            if results:
+                for doc in results:
+                    distance = doc.get("distance", 1.0)
+                    doc["score"] = 1.0 / (1.0 + distance)
+            logger.info(f"向量检索到 {len(results)} 个结果")
+            return results
         except Exception as e:
             logger.error(f"向量检索失败: {e}")
             return []
@@ -161,10 +165,9 @@ class HybridSearchService:
         """
         doc_scores = {}
         
-        # 处理 BM2.5 结果
         for rank, doc in enumerate(bm25_docs):
-            doc_id = doc.get("id", "") or doc.get("text", "")[:100]  # 使用 id 或文本前100字符作为标识
-            rrf_score = 1.0 / (rank + 60)  # RRF 公式，k=60
+            doc_id = doc.get("id", "") or doc.get("metadata", {}).get("chunk_id", "") or doc.get("text", "")[:100]
+            rrf_score = 1.0 / (rank + 60)
             weighted_score = rrf_score * bm25_weight
             
             if doc_id not in doc_scores:
@@ -179,9 +182,8 @@ class HybridSearchService:
             doc_scores[doc_id]["score"] += weighted_score
             doc_scores[doc_id]["source"].append("bm25")
         
-        # 处理向量检索结果
         for rank, doc in enumerate(vector_docs):
-            doc_id = doc.get("id", "") or doc.get("text", "")[:100]
+            doc_id = doc.get("id", "") or doc.get("metadata", {}).get("chunk_id", "") or doc.get("text", "")[:100]
             rrf_score = 1.0 / (rank + 60)
             weighted_score = rrf_score * embedding_weight
             

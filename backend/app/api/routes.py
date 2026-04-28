@@ -6,6 +6,7 @@ import json
 import subprocess
 import datetime
 import shutil
+import logging
 
 from app.core.config import load_config, save_config, ensure_data_dirs, UPLOAD_DIR, METADATA_PATH, get_complete_config
 from app.core.dependencies import get_db, get_current_user
@@ -21,6 +22,7 @@ from fastapi.responses import StreamingResponse, JSONResponse
 from pydantic import BaseModel
 
 router = APIRouter(tags=["api"])
+logger = logging.getLogger(__name__)
 
 
 class Message(BaseModel):
@@ -49,8 +51,9 @@ class QARequest(BaseModel):
 async def upload_files(files: List[UploadFile] = File(...)):
     cfg = get_complete_config()
     ensure_data_dirs()
+    max_size = cfg.get("upload_max_size", 104857600)
     saved = []
-    failed = []  # 记录失败的文件
+    failed = []
     
     for f in files:
         file_ext = os.path.splitext(f.filename)[1].lower()
@@ -61,11 +64,16 @@ async def upload_files(files: List[UploadFile] = File(...)):
         added_to_vector_store = False
         
         try:
+            content = await f.read()
+            if len(content) > max_size:
+                failed.append({"filename": f.filename, "reason": f"文件大小超过限制 ({max_size // 1048576}MB)"})
+                continue
+            await f.seek(0)
             # 检查文件类型
-            if file_ext in [".pdf", ".docx", ".doc"]:
+            if file_ext in [".pdf", ".docx", ".doc", ".xlsx", ".xls"]:
                 # 对于 PDF 文件，如果转换功能未启用，则直接上传
                 if file_ext == ".pdf" and not cfg.get("allow_pdf_conversion", False):
-                    print(f"[DEBUG] PDF 转换功能未启用，直接上传 PDF 文件: {f.filename}")
+                    logger.debug("PDF 转换功能未启用，直接上传 PDF 文件: %s", f.filename)
                     dest = await save_upload(f)
                     processed_filename = os.path.basename(dest)
                     final_file_path = dest
@@ -97,16 +105,24 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         "chunks_count": ingest_result.get("chunks_count", 0),
                         "summary_generated": ingest_result.get("summary_generated", False)
                     })
-                    print(f"[DEBUG] PDF 文件 {f.filename} 直接上传成功")
+                    logger.debug("PDF 文件 %s 直接上传成功", f.filename)
                     continue
                 
                 # 1. 先保存文件到临时位置
                 temp_path = await save_upload(f)
-                print(f"[DEBUG] 处理文件: {temp_path}")
+                logger.debug("处理文件: %s", temp_path)
                 
                 # 2. 根据文件类型选择转换脚本
                 if file_ext == ".pdf":
-                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "pdf2markdown.py")
+                    pdf_conversion_method = cfg.get("pdf_conversion_method", "marker")
+                    if pdf_conversion_method == "markitdown":
+                        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "pdf2markdown_markitdown.py")
+                        logger.debug("使用 MarkItDown 进行 PDF 转换")
+                    else:
+                        script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "pdf2markdown.py")
+                        logger.debug("使用 Marker 进行 PDF 转换")
+                elif file_ext in [".xlsx", ".xls"]:
+                    script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "excel2markdown.py")
                 else:
                     script_path = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "scripts", "docx2markdown.py")
                 
@@ -114,7 +130,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 temp_output_dir = os.path.join(os.path.dirname(temp_path), "convert_temp")
                 os.makedirs(temp_output_dir, exist_ok=True)
                 
-                print(f"[DEBUG] 运行转换脚本: {script_path}")
+                logger.debug("运行转换脚本: %s", script_path)
                 python_exe = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", ".venv", "Scripts", "python.exe")
                 if not os.path.exists(python_exe):
                     python_exe = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "..", ".venv", "bin", "python")
@@ -123,10 +139,11 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 
                 # 运行转换脚本（输出直接显示在终端，便于调试）
                 result = subprocess.run(
-                    [python_exe, script_path, temp_path, temp_output_dir]
+                    [python_exe, script_path, temp_path, temp_output_dir],
+                    timeout=cfg.get("timeouts", {}).get("docx2markdown_subprocess", 300)
                 )
                 
-                print(f"[DEBUG] 转换完成，返回码: {result.returncode}")
+                logger.debug("转换完成，返回码: %s", result.returncode)
                 
                 # 3. 查找转换后的Markdown文件
                 base_name = os.path.splitext(os.path.basename(temp_path))[0]
@@ -184,7 +201,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         "chunks_count": ingest_result.get("chunks_count", 0),
                         "summary_generated": ingest_result.get("summary_generated", False)
                     })
-                    print(f"[DEBUG] 文件 {f.filename} 处理成功")
+                    logger.debug("文件 %s 处理成功", f.filename)
                     
                     # 清理临时目录
                     if os.path.exists(temp_output_dir):
@@ -197,7 +214,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
             
             # 过滤掉图片文件
             elif file_ext in [".jpg", ".jpeg", ".png", ".gif", ".bmp"]:
-                print(f"[DEBUG] 跳过图片文件: {f.filename}")
+                logger.debug("跳过图片文件: %s", f.filename)
                 failed.append({"filename": f.filename, "reason": "不支持图片文件"})
                 continue
             
@@ -234,10 +251,9 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     "chunks_count": ingest_result.get("chunks_count", 0),
                     "summary_generated": ingest_result.get("summary_generated", False)
                 })
-                print(f"[DEBUG] 文件 {f.filename} 处理成功")
-        
+                logger.debug("文件 %s 处理成功", f.filename)
         except Exception as e:
-            print(f"[ERROR] 文件 {f.filename} 处理失败: {e}")
+            logger.error("文件 %s 处理失败: %s", f.filename, e)
             import traceback
             traceback.print_exc()
             
@@ -248,18 +264,18 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     try:
                         from app.services.vector_store import delete_documents_by_filename
                         deleted_count = delete_documents_by_filename(processed_filename)
-                        print(f"[DEBUG] 已回滚，从向量库删除 {deleted_count} 个文档")
+                        logger.debug("已回滚，从向量库删除 %d 个文档", deleted_count)
                     except Exception as rollback_error:
-                        print(f"[ERROR] 回滚向量库失败: {rollback_error}")
+                        logger.error("回滚向量库失败: %s", rollback_error)
                 
                 # 2. 删除对应的摘要
                 if processed_filename:
                     try:
                         from app.services.summary_store import delete_document_summary
                         delete_document_summary(processed_filename)
-                        print(f"[DEBUG] 已删除文档摘要: {processed_filename}")
+                        logger.debug("已删除文档摘要: %s", processed_filename)
                     except Exception as rollback_error:
-                        print(f"[ERROR] 删除摘要失败: {rollback_error}")
+                        logger.error("删除摘要失败: %s", rollback_error)
                 
                 # 3. 从 metadata 中删除
                 if added_to_metadata and processed_filename:
@@ -272,18 +288,18 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         # 过滤掉该文件的记录
                         metas = [m for m in metas if m.get("filename") != processed_filename]
                         METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
-                        print(f"[DEBUG] 已从 metadata 删除: {processed_filename}")
+                        logger.debug("已从 metadata 删除: %s", processed_filename)
                     except Exception as rollback_error:
-                        print(f"[ERROR] 回滚 metadata 失败: {rollback_error}")
+                        logger.error("回滚 metadata 失败: %s", rollback_error)
                 
                 # 4. 删除文件
                 if final_file_path and os.path.exists(final_file_path):
                     try:
                         delete_uploaded_file(processed_filename)
                         os.remove(final_file_path)
-                        print(f"[DEBUG] 已删除文件: {final_file_path}")
+                        logger.debug("已删除文件: %s", final_file_path)
                     except Exception as rollback_error:
-                        print(f"[ERROR] 删除文件失败: {rollback_error}")
+                        logger.error("删除文件失败: %s", rollback_error)
                 
                 # 5. 清理临时文件
                 if temp_path and os.path.exists(temp_path):
@@ -294,7 +310,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         pass
                         
             except Exception as full_rollback_error:
-                print(f"[ERROR] 完整回滚过程出错: {full_rollback_error}")
+                logger.error("完整回滚过程出错: %s", full_rollback_error)
                 import traceback
                 traceback.print_exc()
             
@@ -330,23 +346,23 @@ def delete_document(filename: str = None, file: str = None):
     if not target_filename:
         raise HTTPException(status_code=400, detail="请提供文件名")
     
-    print(f"[DEBUG] 删除文档: {target_filename}")
+    logger.debug("删除文档: %s", target_filename)
     
     # 从向量库删除对应的文档 chunks
     try:
         from app.services.vector_store import delete_documents_by_filename
         deleted_count = delete_documents_by_filename(target_filename)
-        print(f"[DEBUG] 已从向量库删除 {deleted_count} 个文档片段")
+        logger.debug("已从向量库删除 %d 个文档片段", deleted_count)
     except Exception as e:
-        print(f"[DEBUG] 从向量库删除文档失败: {e}")
+        logger.debug("从向量库删除文档失败: %s", e)
     
     # 删除对应的摘要
     try:
         from app.services.summary_store import delete_document_summary
         delete_document_summary(target_filename)
-        print(f"[DEBUG] 已删除文档摘要: {target_filename}")
+        logger.debug("已删除文档摘要: %s", target_filename)
     except Exception as e:
-        print(f"[DEBUG] 删除文档摘要失败: {e}")
+        logger.debug("删除文档摘要失败: %s", e)
     
     delete_uploaded_file(target_filename)
     return {"status": "deleted", "file": target_filename}
@@ -436,33 +452,55 @@ async def qa_endpoint(req: QARequest):
     cfg = get_complete_config()
     provider = req.provider if req.provider else cfg.get("provider", "openai")
     
-    # 调试日志
-    print(f"[DEBUG] Received QA request with params:")
-    print(f"[DEBUG]   question: {req.question[:50]}...")
-    print(f"[DEBUG]   top_k: {req.top_k}")
-    print(f"[DEBUG]   temperature: {req.temperature}")
-    print(f"[DEBUG]   top_p: {req.top_p}")
-    print(f"[DEBUG]   max_tokens: {req.max_tokens}")
-    print(f"[DEBUG]   presence_penalty: {req.presence_penalty}")
-    print(f"[DEBUG]   frequency_penalty: {req.frequency_penalty}")
-    print(f"[DEBUG]   enable_thinking: {req.enable_thinking}")
-    print(f"[DEBUG]   messages history: {len(req.messages)} messages")
+    logger.debug("Received QA request with params:")
+    logger.debug("  question: %s...", req.question[:50])
+    logger.debug("  top_k: %s", req.top_k)
+    logger.debug("  temperature: %s", req.temperature)
+    logger.debug("  top_p: %s", req.top_p)
+    logger.debug("  max_tokens: %s", req.max_tokens)
+    logger.debug("  presence_penalty: %s", req.presence_penalty)
+    logger.debug("  frequency_penalty: %s", req.frequency_penalty)
+    logger.debug("  enable_thinking: %s", req.enable_thinking)
+    logger.debug("  messages history: %d messages", len(req.messages))
     
-    # 先检查是否需要使用技能
+    import re
+    skill_command_match = re.match(r'^/skill\s+(\S+)(?:\s+(.*))?$', req.question.strip())
+    
     from app.skills import get_skill_manager
     skill_manager = get_skill_manager()
-    use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question, provider=provider)
+    
+    if skill_command_match:
+        skill_name = skill_command_match.group(1)
+        raw_params = skill_command_match.group(2) or ""
+        skill_params = {}
+        if raw_params:
+            for pair in raw_params.split():
+                if "=" in pair:
+                    k, v = pair.split("=", 1)
+                    skill_params[k.strip()] = v.strip()
+                else:
+                    skill_params.setdefault("query", pair)
+        
+        available_skills = [s["name"] for s in skill_manager.list_skills()]
+        if skill_name in available_skills:
+            use_skill = True
+            logger.debug("Command-triggered skill: %s, params: %s", skill_name, skill_params)
+        else:
+            use_skill = False
+            skill_name = None
+            skill_params = None
+            logger.debug("Skill '%s' not found, falling back to RAG", skill_name)
+    else:
+        use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question, provider=provider)
     
     docs = []
     sources = []
     
     if not use_skill:
-        # 不使用技能时才进行 RAG 检索
         from app.services.qa import _retrieve_documents
         docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
         sources = [d.get("metadata", {}) for d in docs]
     
-    # 收集生成参数
     generation_params = {
         "top_k": req.top_k,
         "temperature": req.temperature,
@@ -472,7 +510,10 @@ async def qa_endpoint(req: QARequest):
         "frequency_penalty": req.frequency_penalty,
         "enable_thinking": req.enable_thinking,
         "use_react": req.use_react,
-        "messages": [{"role": m.role, "content": m.content} for m in req.messages]
+        "messages": [{"role": m.role, "content": m.content} for m in req.messages],
+        "use_skill": use_skill,
+        "skill_name": skill_name,
+        "skill_params": skill_params,
     }
     
     # 判断是否应该显示引用材料（仅在不使用技能时）
@@ -644,7 +685,7 @@ def get_document_preview(filename: str, chunk_index: int = None):
                             chunk_content = all_docs['documents'][i]
                             break
             except Exception as e:
-                print(f"[DEBUG] 获取chunk失败: {e}")
+                logger.debug("获取chunk失败: %s", e)
         
         return {
             "status": "ok",

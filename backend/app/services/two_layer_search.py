@@ -24,6 +24,8 @@ class TwoLayerRetriever:
         self.relevance_threshold = self.summary_config.get("relevance_threshold", 0.6)
         self.summary_top_k = self.summary_config.get("summary_top_k", 5)
         self.content_top_k = self.summary_config.get("content_top_k", 3)
+        self._summary_bm25 = None
+        self._summary_bm25_hash = None
     
     def search(
         self, 
@@ -108,77 +110,79 @@ class TwoLayerRetriever:
     def _search_summaries(self, query: str, provider: str = "openai") -> List[Dict[str, Any]]:
         """
         第一层：检索摘要
-        
+
         Args:
             query: 查询文本
             provider: LLM提供商
-            
+
         Returns:
             摘要检索结果，包含相关性分数
         """
         print(f"[DEBUG TwoLayerRetriever._search_summaries] 开始检索摘要，查询: '{query[:50]}...'")
         store = get_summary_store()
         all_summaries = store.get_all_summaries()
-        
+
         print(f"[DEBUG TwoLayerRetriever._search_summaries] 获取到 {len(all_summaries)} 个摘要")
-        
+
         if not all_summaries:
             logger.info("没有可用的文档摘要")
             print(f"[DEBUG TwoLayerRetriever._search_summaries] 没有可用的文档摘要")
             return []
-        
+
         logger.info(f"共有 {len(all_summaries)} 个文档摘要待检索")
-        
-        # 使用BM2.5对摘要进行检索
+
         try:
-            bm25_retriever = get_bm25_retriever()
-            
-            # 构建摘要索引
-            summary_texts = []
-            summary_metas = []
-            for summary in all_summaries:
-                summary_text = f"标题: {summary.filename}\n"
-                summary_text += f"摘要: {summary.summary}\n"
-                summary_text += f"主题: {', '.join(summary.key_topics)}\n"
-                summary_text += f"要点: {', '.join(summary.key_points)}\n"
-                summary_text += f"结论: {', '.join(summary.main_conclusions)}\n"
-                summary_text += f"术语: {', '.join(summary.technical_terms)}\n"
-                if hasattr(summary, 'authors') and summary.authors:
-                    summary_text += f"作者: {', '.join(summary.authors)}\n"
-                if hasattr(summary, 'publication_year') and summary.publication_year:
-                    summary_text += f"发表年份: {summary.publication_year}\n"
-                if hasattr(summary, 'venue') and summary.venue:
-                    summary_text += f"期刊/会议: {summary.venue}\n"
-                
-                summary_texts.append(summary_text)
-                summary_metas.append({
-                    "filename": summary.filename,
-                    "summary": summary.summary,
-                    "key_topics": summary.key_topics,
-                    "quality_score": summary.quality_score,
-                    "is_summary": True
-                })
-            
-            # 临时构建BM2.5索引进行检索
-            # 注意：这里我们直接使用BM2.5的搜索，但不修改全局索引
-            from app.services.bm25_search import BM25Retriever
-            temp_retriever = BM25Retriever()
-            
-            # 生成临时 ID
-            summary_ids = [str(uuid.uuid4()) for _ in range(len(summary_texts))]
-            temp_retriever._build_index(summary_texts, summary_metas, summary_ids)
-            
-            results = temp_retriever.search(query, top_k=self.summary_top_k)
-            
+            current_hash = hash(tuple(s.filename for s in all_summaries))
+            if self._summary_bm25 is None or self._summary_bm25_hash != current_hash:
+                summary_texts = []
+                summary_metas = []
+                summary_ids = []
+                for idx, summary in enumerate(all_summaries):
+                    summary_text = f"标题: {summary.filename}\n"
+                    summary_text += f"摘要: {summary.summary}\n"
+                    summary_text += f"主题: {', '.join(summary.key_topics)}\n"
+                    summary_text += f"要点: {', '.join(summary.key_points)}\n"
+                    summary_text += f"结论: {', '.join(summary.main_conclusions)}\n"
+                    summary_text += f"术语: {', '.join(summary.technical_terms)}\n"
+                    if hasattr(summary, 'authors') and summary.authors:
+                        summary_text += f"作者: {', '.join(summary.authors)}\n"
+                    if hasattr(summary, 'publication_year') and summary.publication_year:
+                        summary_text += f"发表年份: {summary.publication_year}\n"
+                    if hasattr(summary, 'venue') and summary.venue:
+                        summary_text += f"期刊/会议: {summary.venue}\n"
+
+                    summary_texts.append(summary_text)
+                    summary_metas.append({
+                        "filename": summary.filename,
+                        "summary": summary.summary,
+                        "key_topics": summary.key_topics,
+                        "quality_score": summary.quality_score,
+                        "is_summary": True
+                    })
+                    summary_ids.append(str(uuid.uuid4()))
+
+                from app.services.bm25_search import BM25Retriever
+                self._summary_bm25 = BM25Retriever()
+                self._summary_bm25._build_index(summary_texts, summary_metas, summary_ids)
+                self._summary_bm25_hash = current_hash
+
+            results = self._summary_bm25.search(query, top_k=self.summary_top_k)
+
             logger.debug(f"BM2.5 原始搜索结果: {results}")
-            
-            # 添加相关性分数（基于BM2.5分数）
+
+            filtered_results = []
             for result in results:
-                result["relevance_score"] = result.get("score", 0.0)
-            
-            logger.info(f"摘要检索完成，返回 {len(results)} 个结果")
-            return results
-            
+                score = result.get("score", 0.0)
+                result["relevance_score"] = score
+                if score >= self.relevance_threshold:
+                    filtered_results.append(result)
+
+            if len(filtered_results) < len(results):
+                logger.info(f"摘要检索: {len(results)} 个结果中 {len(filtered_results)} 个通过相关性阈值 ({self.relevance_threshold})")
+
+            logger.info(f"摘要检索完成，返回 {len(filtered_results)} 个结果")
+            return filtered_results
+
         except Exception as e:
             logger.error(f"摘要检索失败: {e}")
             import traceback

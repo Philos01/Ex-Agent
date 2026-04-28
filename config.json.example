@@ -1,4 +1,3 @@
-
 {
   "provider": "openai",
   "embedding_mode": "local",
@@ -8,9 +7,9 @@
   "openai_embedding_model": "text-embedding-3-small",
   "openai_chat_model": "gpt-3.5-turbo",
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "qwen3:4b-instruct",
+  "ollama_model": "",
   "chunk_size": 1500,
-  "chunk_overlap": 100,
+  "chunk_overlap": 225,
   "temperature": 0.7,
   "top_k": 5,
   "top_p": 0.9,
@@ -19,13 +18,13 @@
   "frequency_penalty": 0.0,
   "max_history": 10,
   "upload_max_size": 104857600,
-  "enable_thinking": false,
   "allow_user_registration": false,
   "allow_pdf_conversion": false,
+  "pdf_conversion_method": "marker",/"markitdown"
   "hybrid_search": {
     "enabled": true,
     "initial_retrieve_count": 20,
-    "final_select_count": 3,
+    "final_select_count": 5,
     "bm25_weight": 0.5,
     "embedding_weight": 0.5,
     "rerank_model": "BAAI/bge-reranker-v2-m3",
@@ -36,7 +35,8 @@
     "relevance_threshold": 0.6,
     "summary_top_k": 5,
     "content_top_k": 3,
-    "auto_generate_summary": true
+    "auto_generate_summary": true,
+    "enable_query_rewrite": true
   },
   "context_management": {
     "enabled": true,
@@ -44,12 +44,30 @@
     "exclude_error_messages": true,
     "exclude_questionable_messages": false
   },
+  "timeouts": {
+    "enabled": true,
+    "requests_post": 60,
+    "requests_stream": 60,
+    "document_summary": 300,
+    "skill_executor_python": 60,
+    "skill_executor_shell": 60,
+    "react_agent_subprocess": 60,
+    "docx2markdown_subprocess": 300
+  },
   "skills": {
     "enabled": true,
+    "auto_discover": true,
+    "arxiv-watcher": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    "amap-weather": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
     "arxiv_search": {
       "enabled": true,
       "max_results": 5
     }
   }
 }
-

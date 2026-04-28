@@ -4,10 +4,20 @@
 
 ## 配置文件
 
-项目使用两个主要配置来源：
+项目使用统一的配置文件结构：
 
-1. **config.json** - 主配置文件（JSON 格式）
+1. **config.json** - 主配置文件（JSON 格式，位于项目根目录）
 2. **环境变量** - 敏感信息和系统配置
+
+### 配置加载优先级
+
+配置加载优先级从高到低：
+
+1. **环境变量** - 最高优先级，用于敏感信息和覆盖配置
+2. **config.json** - 主配置文件（项目根目录），包含所有配置项
+3. **DEFAULT_CONFIG** - 后端代码中的默认值（仅作为后备）
+
+**重要**: 所有配置项都应在 `config.json` 中设置，`DEFAULT_CONFIG` 仅作为后备。
 
 ---
 
@@ -25,7 +35,7 @@
   "openai_embedding_model": "text-embedding-3-small",
   "openai_chat_model": "gpt-3.5-turbo",
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "",
+  "ollama_model": "qwen3:4b-instruct",
   "chunk_size": 1500,
   "chunk_overlap": 100,
   "temperature": 0.7,
@@ -36,9 +46,10 @@
   "frequency_penalty": 0.0,
   "max_history": 10,
   "upload_max_size": 104857600,
-  "allow_user_registration": false,
-  "allow_pdf_conversion": false,
   "enable_thinking": false,
+  "allow_user_registration": false,
+  "pdf_conversion_method": "marker",
+  "allow_pdf_conversion": false,
   "hybrid_search": {
     "enabled": true,
     "initial_retrieve_count": 20,
@@ -53,17 +64,75 @@
     "relevance_threshold": 0.6,
     "summary_top_k": 5,
     "content_top_k": 3,
-    "auto_generate_summary": true,
-    "enable_query_rewrite": true
+    "auto_generate_summary": true
   },
   "context_management": {
     "enabled": true,
     "max_history_rounds": 5,
     "exclude_error_messages": true,
     "exclude_questionable_messages": false
+  },
+  "timeouts": {
+    "enabled": true,
+    "requests_post": 60,
+    "requests_stream": 60,
+    "document_summary": 300,
+    "skill_executor_python": 60,
+    "skill_executor_shell": 60,
+    "react_agent_subprocess": 60,
+    "docx2markdown_subprocess": 300
+  },
+  "skills": {
+    "enabled": true,
+    "auto_discover": true,
+    "arxiv-watcher": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    "amap-weather": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    "arxiv_search": {
+      "enabled": true,
+      "max_results": 5
+    }
   }
 }
 ```
+
+---
+
+## 技能系统配置
+
+技能系统配置统一在 `config.json` 的 `skills` 部分管理：
+
+```json
+{
+  "skills": {
+    "enabled": true,
+    "auto_discover": true,
+    "arxiv-watcher": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    "amap-weather": {
+      "enabled": true,
+      "version": "1.0.0"
+    },
+    "arxiv_search": {
+      "enabled": true,
+      "max_results": 5
+    }
+  }
+}
+```
+
+**说明**:
+- `skills.enabled`: 是否启用技能系统
+- `skills.auto_discover`: 是否自动发现技能目录中的技能
+- `skills.{skill_name}`: 各技能的独立配置
+- 技能特定配置（如 API Key）仍需通过环境变量设置
 
 ---
 
@@ -203,6 +272,7 @@
 - `llama2`
 - `mistral`
 - `qwen`（通义千问）
+- `qwen3:4b-instruct`
 - `yi`（零一万物）
 
 **示例**:
@@ -210,7 +280,7 @@
 {
   "provider": "ollama",
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "qwen:7b"
+  "ollama_model": "qwen3:4b-instruct"
 }
 ```
 
@@ -334,6 +404,35 @@
 
 ---
 
+#### pdf_conversion_method
+
+- **类型**: string
+- **默认值**: "marker"
+- **可选值**: "marker", "markitdown"
+- **说明**: PDF 转 Markdown 的转换方法
+
+**方法对比**:
+
+| 方法 | 说明 | 依赖 | 特点 |
+|------|------|------|------|
+| marker | 使用 Marker 库 + Surya OCR | marker, torch, transformers | 转换质量高，支持公式和复杂布局，但速度较慢，需要 GPU |
+| markitdown | 使用 MarkItDown 库 | markitdown | 轻量级，转换速度快，适合简单 PDF |
+
+**示例**:
+```json
+{
+  "pdf_conversion_method": "markitdown"
+}
+```
+
+**注意事项**:
+- 使用 markitdown 方法需要安装依赖：`pip install 'markitdown[pdf]'`
+- marker 方法需要 GPU 支持才能获得较好的性能
+- 对于包含复杂公式和布局的 PDF，建议使用 marker 方法
+- 对于简单的文本 PDF，markitdown 方法速度更快
+
+---
+
 #### enable_thinking
 
 - **类型**: boolean
@@ -423,8 +522,7 @@
     "relevance_threshold": 0.6,
     "summary_top_k": 5,
     "content_top_k": 3,
-    "auto_generate_summary": true,
-    "enable_query_rewrite": true
+    "auto_generate_summary": true
   }
 }
 ```
@@ -506,6 +604,89 @@
 
 ---
 
+## 超时配置 (timeouts)
+
+超时配置用于控制各类操作的最大执行时间：
+
+```json
+{
+  "timeouts": {
+    "enabled": true,
+    "requests_post": 60,
+    "requests_stream": 60,
+    "document_summary": 300,
+    "skill_executor_python": 60,
+    "skill_executor_shell": 60,
+    "react_agent_subprocess": 60,
+    "docx2markdown_subprocess": 300
+  }
+}
+```
+
+#### timeouts.enabled
+
+- **类型**: boolean
+- **默认值**: true
+- **说明**: 是否启用超时控制
+
+---
+
+#### timeouts.requests_post
+
+- **类型**: integer
+- **默认值**: 60
+- **说明**: POST 请求超时时间（秒）
+
+---
+
+#### timeouts.requests_stream
+
+- **类型**: integer
+- **默认值**: 60
+- **说明**: 流式请求超时时间（秒）
+
+---
+
+#### timeouts.document_summary
+
+- **类型**: integer
+- **默认值**: 300
+- **说明**: 文档摘要生成超时时间（秒）
+
+---
+
+#### timeouts.skill_executor_python
+
+- **类型**: integer
+- **默认值**: 60
+- **说明**: Python 技能执行器超时时间（秒）
+
+---
+
+#### timeouts.skill_executor_shell
+
+- **类型**: integer
+- **默认值**: 60
+- **说明**: Shell 技能执行器超时时间（秒）
+
+---
+
+#### timeouts.react_agent_subprocess
+
+- **类型**: integer
+- **默认值**: 60
+- **说明**: ReAct Agent 子进程超时时间（秒）
+
+---
+
+#### timeouts.docx2markdown_subprocess
+
+- **类型**: integer
+- **默认值**: 300
+- **说明**: Docx 转 Markdown 子进程超时时间（秒）
+
+---
+
 ## 环境变量配置
 
 敏感配置通过环境变量设置，创建 `.env` 文件：
@@ -521,6 +702,9 @@ ACCESS_TOKEN_EXPIRE_MINUTES=1440
 # OpenAI 配置（仅从环境变量读取）
 OPENAI_API_KEY=sk-your-openai-api-key
 OPENAI_BASE_URL=https://api.openai.com/v1
+
+# 高德天气 API Key（技能使用）
+AMAP_API_KEY=79b5363b56d88b0763f983fe4f30be5d
 ```
 
 ### 环境变量说明
@@ -532,6 +716,47 @@ OPENAI_BASE_URL=https://api.openai.com/v1
 | ACCESS_TOKEN_EXPIRE_MINUTES | Token 过期时间（分钟） | 1440 |
 | OPENAI_API_KEY | OpenAI API 密钥 | - |
 | OPENAI_BASE_URL | OpenAI API 基础 URL | https://api.openai.com/v1 |
+| AMAP_API_KEY | 高德天气 API 密钥 | - |
+
+---
+
+## 技能配置 (skills_config.yaml)
+
+技能系统使用独立的 YAML 配置文件：
+
+```yaml
+global:
+  enabled: true
+  auto_discover: true
+
+arxiv-watcher:
+  enabled: true
+  version: 1.0.0
+
+amap-weather:
+  enabled: true
+  version: 1.0.0
+```
+
+### 技能配置说明
+
+#### global.enabled
+
+- **类型**: boolean
+- **默认值**: true
+- **说明**: 是否启用技能系统
+
+#### global.auto_discover
+
+- **类型**: boolean
+- **默认值**: true
+- **说明**: 是否自动发现技能目录中的技能
+
+#### {skill_name}.enabled
+
+- **类型**: boolean
+- **默认值**: true
+- **说明**: 是否启用特定技能
 
 ---
 
@@ -604,5 +829,17 @@ Content-Type: application/json
     "bm25_weight": 0.6,
     "embedding_weight": 0.4
   }
+}
+```
+
+### Ollama 本地配置
+
+```json
+{
+  "provider": "ollama",
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "qwen3:4b-instruct",
+  "embedding_mode": "local",
+  "temperature": 0.7
 }
 ```

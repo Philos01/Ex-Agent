@@ -207,6 +207,50 @@ def search(query: str, top_k: int = 5, provider: str = None):
         return []
 
 
+def search_with_distances(query: str, top_k: int = 5, provider: str = None):
+    """
+    在向量库中搜索，返回包含距离信息的结果
+
+    Args:
+        query: 查询文本
+        top_k: 返回结果数量
+        provider: 已废弃，保留兼容性
+
+    Returns:
+        搜索结果列表，每个结果包含 text, metadata, distance
+    """
+    if not query or not query.strip():
+        logger.error("查询为空，无法执行向量检索")
+        return []
+
+    collection = init_collection()
+
+    try:
+        _init_embedding_service()
+
+        q_emb = EmbeddingService.embed_texts([query])
+
+        if not q_emb or not q_emb[0]:
+            logger.warning("嵌入失败，使用文本查询")
+            res = collection.query(query_texts=[query], n_results=top_k, include=["documents", "metadatas", "distances"])
+        else:
+            res = collection.query(query_embeddings=q_emb, n_results=top_k, include=["documents", "metadatas", "distances"])
+
+        docs = []
+        docs_list = res.get("documents", [[]])[0]
+        metas_list = res.get("metadatas", [[]])[0]
+        dists_list = res.get("distances", [[]])[0]
+        for d, m, dist in zip(docs_list, metas_list, dists_list):
+            docs.append({"text": d, "metadata": m, "distance": dist})
+
+        logger.info(f"搜索完成（含距离），返回 {len(docs)} 个结果")
+        return docs
+
+    except Exception as e:
+        logger.error(f"Search with distances error: {e}")
+        return []
+
+
 def search_by_filenames(query: str, filenames: List[str], top_k: int = 5, provider: str = None):
     """
     在指定文件中搜索
@@ -285,23 +329,28 @@ def clear_all():
 def delete_documents_by_filename(filename: str):
     """
     按文件名删除向量库中的文档
-    
+
     Args:
         filename: 文件名
-        
+
     Returns:
         删除的文档数量
     """
     try:
         collection = init_collection()
         
-        # 获取所有文档，查找匹配的文件名
+        try:
+            collection.delete(where={"source": filename})
+            logger.info(f"已从向量库删除文件名 {filename} 的文档")
+            return 1
+        except Exception as e:
+            logger.warning(f"where 过滤删除失败，回退到全量扫描: {e}")
+        
         all_docs = collection.get(include=["metadatas"])
         
         if not all_docs or not all_docs.get("ids"):
             return 0
         
-        # 找出所有匹配的文档 ID
         ids_to_delete = []
         for i, metadata in enumerate(all_docs.get("metadatas", [])):
             if metadata and metadata.get("source") == filename:

@@ -92,31 +92,34 @@ class BaseSkill(ABC):
     
     def _load_config(self) -> None:
         """
-        Load configuration from various sources with priority:
+        Load configuration from various sources with priority (highest to lowest):
         1. Environment variables (SKILL_{NAME}_{KEY})
-        2. skills_config.yaml
-        3. config.json (legacy)
+        2. config.json (main configuration file)
+        3. skills_config.yaml (legacy, for backward compatibility)
         """
         import os
         from app.core.config import load_config
-        
-        # Load from legacy config.json as fallback
+
+        # Load from legacy config.json (main config file in root directory)
         try:
             cfg = load_config()
             skills_cfg = cfg.get("skills", {}).get(self.name, {})
             self._config.update(skills_cfg)
         except Exception as e:
-            logger.debug(f"Could not load from legacy config: {e}")
-        
-        # Load from skills_config.yaml if exists
+            logger.debug(f"Could not load from config.json: {e}")
+
+        # Load from skills_config.yaml if exists (legacy, for backward compatibility)
+        # Note: config.json values take precedence over skills_config.yaml values
         try:
             yaml_config = self._load_yaml_config()
             if yaml_config:
                 skill_yaml_cfg = yaml_config.get(self.name, {})
-                self._config.update(skill_yaml_cfg)
+                for key, value in skill_yaml_cfg.items():
+                    if key not in self._config:
+                        self._config[key] = value
         except Exception as e:
             logger.debug(f"Could not load from YAML config: {e}")
-        
+
         # Load from environment variables (highest priority)
         env_prefix = f"SKILL_{self.name.upper()}_"
         for key, value in os.environ.items():

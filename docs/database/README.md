@@ -25,6 +25,8 @@
 | 并发 | 支持读写并发（有一定限制） |
 | 适用场景 | 中小规模应用、开发环境 |
 
+**注意**: 生产环境建议使用 PostgreSQL 或 MySQL 替代 SQLite，以获得更好的并发性能和可靠性。
+
 ### ORM 框架
 
 使用 **SQLAlchemy 2.0** 作为 ORM 框架：
@@ -34,17 +36,14 @@
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 
-# 创建引擎
 engine = create_engine(
     DATABASE_URL,
     connect_args={"check_same_thread": False},
     echo=False
 )
 
-# Session 工厂
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# 声明基类
 Base = declarative_base()
 ```
 
@@ -448,6 +447,17 @@ sqlite3 data/lab_agent.db ".restore 'data/lab_agent.db.backup'"
 1. 检查关联数据是否存在
 2. 使用级联删除（已在模型中配置）
 3. 先删除子记录，再删除父记录
+
+### 5. 生产环境数据库选择
+
+**建议**: 生产环境推荐使用 PostgreSQL
+
+SQLite 不适合高并发写入的生产环境。建议迁移到 PostgreSQL：
+
+```python
+# 修改 DATABASE_URL
+DATABASE_URL=postgresql://user:password@localhost:5432/lab_agent
+```
 
 ---
 

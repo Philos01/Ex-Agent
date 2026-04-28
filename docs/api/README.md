@@ -2,9 +2,11 @@
 
 ## 目录
 - [基础信息](#基础信息)
+- [API 版本](#api-版本)
 - [认证方式](#认证方式)
 - [状态码说明](#状态码说明)
 - [接口详细定义](#接口详细定义)
+- [v1 API 接口](#v1-api-接口)
 - [示例代码](#示例代码)
 
 ---
@@ -12,6 +14,7 @@
 ## 基础信息
 
 - **Base URL**: `http://localhost:8000/api`
+- **v1 Base URL**: `http://localhost:8000/api/v1`
 - **数据格式**: JSON
 - **字符编码**: UTF-8
 
@@ -21,6 +24,25 @@
 
 - **Swagger UI**: http://localhost:8000/docs
 - **ReDoc**: http://localhost:8000/redoc
+
+---
+
+## API 版本
+
+本系统提供两个版本的 API：
+
+| 版本 | Base URL | 说明 |
+|------|----------|------|
+| v1 | `/api/v1/*` | 最新版本的 API 接口，推荐使用 |
+| 原始 | `/api/*` | 保持向后兼容的原始接口 |
+
+### 版本差异
+
+v1 API 与原始 API 的主要差异：
+
+- v1 API 使用 `/api/v1/` 前缀
+- v1 API 结构更清晰，路由分组更合理
+- 新功能将首先在 v1 API 中提供
 
 ---
 
@@ -52,6 +74,8 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 - `GET /api/auth/registration-config`
 - `GET /api/auth/pdf-conversion-config`
 - `GET /api/config` (部分配置)
+- `GET /api/health`
+- `GET /` (根路径)
 
 ---
 
@@ -65,41 +89,51 @@ Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
 | 401 | 未授权 |
 | 403 | 禁止访问 |
 | 404 | 资源不存在 |
-| 429 | 请求过于频繁 |
+| 429 | 请求过于频繁 (速率限制) |
 | 500 | 服务器内部错误 |
 
 ---
 
 ## 接口详细定义
 
-### 1. 认证接口
+### 1. 系统接口
 
-#### 1.1 用户注册
+#### 1.1 健康检查
 
-**接口**: `POST /api/auth/register`
+**接口**: `GET /api/health`
 
-**描述**: 注册新用户（需要启用注册功能）
-
-**请求参数**:
-```json
-{
-  "username": "string",
-  "email": "user@example.com",
-  "password": "string (至少8位)"
-}
-```
+**描述**: 检查系统健康状态
 
 **响应示例**:
 ```json
 {
-  "message": "User registered successfully",
-  "user_id": 1
+  "status": "healthy",
+  "timestamp": 1704067200.123,
+  "version": "2.0",
+  "services": {
+    "vector_store": {"status": "ok", "doc_count": 100},
+    "api_key": {"status": "ok", "access_count": 5000}
+  }
+}
+```
+
+#### 1.2 根路径
+
+**接口**: `GET /`
+
+**响应示例**:
+```json
+{
+  "message": "实验室智能助手 - 后端 API",
+  "version": "2.0"
 }
 ```
 
 ---
 
-#### 1.2 用户登录
+### 2. 认证接口
+
+#### 2.1 用户登录
 
 **接口**: `POST /api/auth/login`
 
@@ -124,13 +158,32 @@ username=your_username&password=your_password
 }
 ```
 
----
+#### 2.2 用户注册
 
-#### 1.3 获取当前用户信息
+**接口**: `POST /api/auth/register`
+
+**描述**: 注册新用户（需要启用注册功能）
+
+**请求参数**:
+```json
+{
+  "username": "string",
+  "email": "user@example.com",
+  "password": "string (至少8位)"
+}
+```
+
+**响应示例**:
+```json
+{
+  "message": "User registered successfully",
+  "user_id": 1
+}
+```
+
+#### 2.3 获取当前用户信息
 
 **接口**: `GET /api/auth/me`
-
-**描述**: 获取当前登录用户的信息
 
 **需要认证**: 是
 
@@ -147,89 +200,9 @@ username=your_username&password=your_password
 
 ---
 
-#### 1.4 获取注册配置
+### 3. 文档管理接口
 
-**接口**: `GET /api/auth/registration-config`
-
-**描述**: 获取用户注册功能配置
-
-**响应示例**:
-```json
-{
-  "allow_user_registration": false
-}
-```
-
----
-
-#### 1.5 更新注册配置
-
-**接口**: `PUT /api/auth/registration-config`
-
-**描述**: 更新用户注册配置（仅管理员）
-
-**需要认证**: 是（需要管理员权限）
-
-**请求参数**:
-```json
-{
-  "allow_registration": true
-}
-```
-
-**响应示例**:
-```json
-{
-  "message": "Registration configuration updated successfully",
-  "allow_user_registration": true
-}
-```
-
----
-
-#### 1.6 获取 PDF 转换配置
-
-**接口**: `GET /api/auth/pdf-conversion-config`
-
-**描述**: 获取 PDF 转换功能配置
-
-**响应示例**:
-```json
-{
-  "allow_pdf_conversion": false
-}
-```
-
----
-
-#### 1.7 更新 PDF 转换配置
-
-**接口**: `PUT /api/auth/pdf-conversion-config`
-
-**描述**: 更新 PDF 转换配置（仅管理员）
-
-**需要认证**: 是（需要管理员权限）
-
-**请求参数**:
-```json
-{
-  "allow_pdf_conversion": true
-}
-```
-
-**响应示例**:
-```json
-{
-  "message": "PDF conversion configuration updated successfully",
-  "allow_pdf_conversion": true
-}
-```
-
----
-
-### 2. 文档管理接口
-
-#### 2.1 上传文档
+#### 3.1 上传文档
 
 **接口**: `POST /api/upload`
 
@@ -260,9 +233,7 @@ username=your_username&password=your_password
 }
 ```
 
----
-
-#### 2.2 获取文档列表
+#### 3.2 获取文档列表
 
 **接口**: `GET /api/documents`
 
@@ -282,20 +253,13 @@ username=your_username&password=your_password
 }
 ```
 
----
-
-#### 2.3 删除文档
+#### 3.3 删除文档
 
 **接口**: `DELETE /api/documents/{filename}`
 
 **或**: `DELETE /api/documents?file={filename}`
 
 **描述**: 删除指定文档
-
-**路径/查询参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| filename | string | 是 | 要删除的文件名 |
 
 **响应示例**:
 ```json
@@ -305,9 +269,7 @@ username=your_username&password=your_password
 }
 ```
 
----
-
-#### 2.4 清空知识库
+#### 3.4 清空知识库
 
 **接口**: `POST /api/clear`
 
@@ -322,34 +284,9 @@ username=your_username&password=your_password
 
 ---
 
-#### 2.5 获取文档预览
+### 4. 问答接口
 
-**接口**: `GET /api/document/preview`
-
-**描述**: 获取文档预览内容
-
-**查询参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| filename | string | 是 | 文档文件名 |
-| chunk_index | integer | 否 | 指定 chunk 索引 |
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "filename": "document.md",
-  "full_text": "文档全文内容...",
-  "chunk_content": "指定 chunk 内容...",
-  "chunk_index": 0
-}
-```
-
----
-
-### 3. 问答接口
-
-#### 3.1 问答（流式）
+#### 4.1 问答（流式）
 
 **接口**: `POST /api/qa`
 
@@ -394,6 +331,7 @@ username=your_username&password=your_password
 **事件类型**:
 - `sources`: 引用来源
 - `content`: 回答内容
+- `thinking`: 思考步骤（当 enable_thinking 为 true 时）
 - `state`: 状态信息
 - `[DONE]`: 结束信号
 
@@ -405,20 +343,14 @@ data: {"content": "根据"}
 
 data: {"content": "文档"}
 
-data: {"content": "，"}
-
-data: {"content": "这是"}
-
-data: {"content": "回答"}
-
 data: [DONE]
 ```
 
 ---
 
-### 4. 配置管理接口
+### 5. 配置管理接口
 
-#### 4.1 获取配置
+#### 5.1 获取配置
 
 **接口**: `GET /api/config`
 
@@ -441,9 +373,7 @@ data: [DONE]
 }
 ```
 
----
-
-#### 4.2 更新配置
+#### 5.2 更新配置
 
 **接口**: `POST /api/config`
 
@@ -474,9 +404,9 @@ data: [DONE]
 
 ---
 
-### 5. 向量库管理接口
+### 6. 向量库管理接口
 
-#### 5.1 获取向量库状态
+#### 6.1 获取向量库状态
 
 **接口**: `GET /api/vector-store/status`
 
@@ -493,9 +423,7 @@ data: [DONE]
 }
 ```
 
----
-
-#### 5.2 重置向量库
+#### 6.2 重置向量库
 
 **接口**: `POST /api/vector-store/reset`
 
@@ -511,9 +439,9 @@ data: [DONE]
 
 ---
 
-### 6. 嵌入模型管理接口
+### 7. 嵌入模型管理接口
 
-#### 6.1 获取推荐模型列表
+#### 7.1 获取推荐模型列表
 
 **接口**: `GET /api/embedding/models/recommended`
 
@@ -529,45 +457,12 @@ data: [DONE]
       "description": "中文小型嵌入模型",
       "dimensions": 512,
       "language": "zh"
-    },
-    {
-      "name": "BAAI/bge-large-zh-v1.5",
-      "description": "中文大型嵌入模型",
-      "dimensions": 1024,
-      "language": "zh"
     }
   ]
 }
 ```
 
----
-
-#### 6.2 获取嵌入状态
-
-**接口**: `GET /api/embedding/status`
-
-**描述**: 获取当前嵌入模型状态
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "data": {
-    "mode": "local",
-    "config": {
-      "local_embedding_model": "BAAI/bge-small-zh-v1.5",
-      "openai_embedding_model": "text-embedding-3-small"
-    },
-    "initialized": true,
-    "current_mode": "local",
-    "local_model": "BAAI/bge-small-zh-v1.5"
-  }
-}
-```
-
----
-
-#### 6.3 设置嵌入模式
+#### 7.2 设置嵌入模式
 
 **接口**: `POST /api/embedding/mode`
 
@@ -592,159 +487,74 @@ data: [DONE]
 
 ---
 
-#### 6.4 设置本地嵌入模型
+## v1 API 接口
 
-**接口**: `POST /api/embedding/local-model`
+v1 API 提供更规范的接口设计，所有接口都需要认证（除了明确标注的）。
 
-**描述**: 设置本地嵌入模型
+### v1 认证接口
 
-**请求参数**:
-```json
-{
-  "model_name": "BAAI/bge-small-zh-v1.5",
-  "cache_dir": ""
-}
+#### 用户登录
+```
+POST /api/v1/auth/login
 ```
 
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "message": "本地模型已设置为: BAAI/bge-small-zh-v1.5",
-  "model_name": "BAAI/bge-small-zh-v1.5"
-}
+#### 获取当前用户
+```
+GET /api/v1/auth/me
 ```
 
----
+### v1 业务接口
 
-### 7. 摘要管理接口
-
-#### 7.1 列出所有摘要
-
-**接口**: `GET /api/summaries`
-
-**描述**: 列出所有文档摘要
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "summaries": [
-    {
-      "filename": "document.md",
-      "summary": "文档摘要...",
-      "key_topics": ["主题1", "主题2"],
-      "quality_score": 0.9,
-      "generated_at": "2024-01-01T00:00:00"
-    }
-  ]
-}
+#### 问答
+```
+POST /api/v1/qa
 ```
 
----
-
-#### 7.2 获取指定文档摘要
-
-**接口**: `GET /api/summaries/{filename}`
-
-**描述**: 获取指定文档的摘要
-
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| filename | string | 是 | 文档文件名 |
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "summary": {
-    "filename": "document.md",
-    "summary": "文档摘要...",
-    "key_topics": ["主题1", "主题2"],
-    "quality_score": 0.9,
-    "generated_at": "2024-01-01T00:00:00"
-  }
-}
+#### 上传文档
+```
+POST /api/v1/upload
 ```
 
----
-
-#### 7.3 重新生成摘要
-
-**接口**: `POST /api/summaries/{filename}/regenerate`
-
-**描述**: 重新生成指定文档的摘要
-
-**路径参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| filename | string | 是 | 文档文件名 |
-
-**查询参数**:
-| 参数名 | 类型 | 必填 | 说明 |
-|--------|------|------|------|
-| provider | string | 否 | LLM 供应商 |
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "message": "摘要重新生成成功",
-  "summary": { ... }
-}
+#### 获取文档列表
+```
+GET /api/v1/documents
 ```
 
----
-
-### 8. 上下文管理接口
-
-#### 8.1 获取上下文历史
-
-**接口**: `GET /api/context/{session_id}`
-
-**描述**: 获取指定会话的上下文历史
-
-**路径参数**:
-| 参数名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| session_id | string | "default" | 会话 ID |
-
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "history": [
-    {"role": "user", "content": "问题1"},
-    {"role": "assistant", "content": "回答1"}
-  ],
-  "stats": {
-    "total_messages": 10,
-    "user_messages": 5,
-    "assistant_messages": 5
-  }
-}
+#### 删除文档
+```
+DELETE /api/v1/documents/{filename}
 ```
 
----
+#### 获取配置
+```
+GET /api/v1/config
+```
 
-#### 8.2 清除上下文历史
+#### 更新配置
+```
+POST /api/v1/config
+```
 
-**接口**: `DELETE /api/context/{session_id}`
+#### 获取向量库状态
+```
+GET /api/v1/vector-store/status
+```
 
-**描述**: 清除指定会话的上下文历史
+#### 重置向量库
+```
+POST /api/v1/vector-store/reset
+```
 
-**路径参数**:
-| 参数名 | 类型 | 默认值 | 说明 |
-|--------|------|--------|------|
-| session_id | string | "default" | 会话 ID |
+### v1 技能接口
 
-**响应示例**:
-```json
-{
-  "status": "ok",
-  "message": "会话 default 的上下文历史已清除"
-}
+#### 获取可用技能列表
+```
+GET /api/v1/skills
+```
+
+#### 执行技能
+```
+POST /api/v1/skills/execute
 ```
 
 ---
@@ -761,7 +571,6 @@ import json
 
 BASE_URL = "http://localhost:8000/api"
 
-# 登录
 def login(username, password):
     response = requests.post(
         f"{BASE_URL}/auth/login",
@@ -769,7 +578,6 @@ def login(username, password):
     )
     return response.json()["access_token"]
 
-# 上传文档
 def upload_document(token, file_path):
     with open(file_path, "rb") as f:
         files = {"files": f}
@@ -781,17 +589,6 @@ def upload_document(token, file_path):
         )
         return response.json()
 
-# 问答（非流式）
-def ask_question(token, question):
-    headers = {"Authorization": f"Bearer {token}"}
-    response = requests.post(
-        f"{BASE_URL}/qa",
-        json={"question": question, "stream": False},
-        headers=headers
-    )
-    return response.json()
-
-# 问答（流式）
 def ask_question_stream(token, question):
     headers = {"Authorization": f"Bearer {token}"}
     response = requests.post(
@@ -800,7 +597,7 @@ def ask_question_stream(token, question):
         headers=headers,
         stream=True
     )
-    
+
     for line in response.iter_lines():
         if line:
             line = line.decode('utf-8')
@@ -814,6 +611,10 @@ def ask_question_stream(token, question):
                         print(parsed['content'], end='', flush=True)
                 except json.JSONDecodeError:
                     pass
+
+def health_check():
+    response = requests.get(f"{BASE_URL}/health")
+    return response.json()
 ```
 
 ### JavaScript 示例
@@ -827,7 +628,6 @@ const api = axios.create({
   baseURL: 'http://localhost:8000/api',
 })
 
-// 添加认证拦截器
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem('auth_token')
   if (token) {
@@ -836,30 +636,27 @@ api.interceptors.request.use((config) => {
   return config
 })
 
-// 登录
 export async function login(username, password) {
   const formData = new FormData()
   formData.append('username', username)
   formData.append('password', password)
-  
+
   const response = await api.post('/auth/login', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
   return response.data
 }
 
-// 上传文档
 export async function uploadDocument(file) {
   const formData = new FormData()
   formData.append('files', file)
-  
+
   const response = await api.post('/upload', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
   return response.data
 }
 
-// 问答（流式）
 export async function askQuestionStream(question, onData, onComplete) {
   const response = await api.post('/qa', {
     question,
@@ -867,25 +664,25 @@ export async function askQuestionStream(question, onData, onComplete) {
   }, {
     responseType: 'stream'
   })
-  
+
   const reader = response.body.getReader()
   const decoder = new TextDecoder()
-  
+
   while (true) {
     const { done, value } = await reader.read()
     if (done) {
       onComplete && onComplete()
       break
     }
-    
+
     const chunk = decoder.decode(value)
     const lines = chunk.split('\n')
-    
+
     for (const line of lines) {
       if (line.startsWith('data: ')) {
         const data = line.slice(6)
         if (data === '[DONE]') continue
-        
+
         try {
           const parsed = JSON.parse(data)
           onData && onData(parsed)
@@ -895,6 +692,11 @@ export async function askQuestionStream(question, onData, onComplete) {
       }
     }
   }
+}
+
+export async function healthCheck() {
+  const response = await api.get('/health')
+  return response.data
 }
 
 export default api

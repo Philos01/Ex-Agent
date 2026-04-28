@@ -20,9 +20,9 @@
 | 操作系统 | Windows 10, Ubuntu 20.04+, macOS 11+ | Ubuntu 22.04 LTS |
 | CPU | 2 核 | 4 核+ |
 | 内存 | 4 GB | 8 GB+ |
-| 磁盘 | 10 GB | 50 GB+ |
-| Python | 3.8+ | 3.10+ |
-| Node.js | 16+ | 18+ |
+| 磁盘 | 10 GB | 50 GB+ SSD |
+| Python | 3.8+ (推荐 3.10+) | 3.10+ |
+| Node.js | 16+ (推荐 18+) | 18+ |
 
 ### 端口要求
 
@@ -48,10 +48,10 @@
    ```bash
    cd backend
    python -m venv .venv
-   
+
    # Windows PowerShell
    .venv\Scripts\Activate.ps1
-   
+
    # Linux/Mac
    source .venv/bin/activate
    ```
@@ -62,7 +62,7 @@
    ```
 
 4. **配置环境变量**
-   
+
    创建 `.env` 文件：
    ```env
    DATABASE_URL=sqlite:///./data/lab_agent.db
@@ -195,7 +195,7 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-        
+
         # WebSocket 支持（如需要）
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
@@ -274,32 +274,23 @@ FROM python:3.10-slim
 
 WORKDIR /app
 
-# 安装系统依赖
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
     && rm -rf /var/lib/apt/lists/*
 
-# 复制依赖文件
 COPY requirements.txt .
-
-# 安装 Python 依赖
 RUN pip install --no-cache-dir -r requirements.txt
 
-# 复制应用代码
 COPY . .
 
-# 创建数据目录
 RUN mkdir -p /app/data
 
-# 暴露端口
 EXPOSE 8000
 
-# 健康检查
 HEALTHCHECK --interval=30s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:8000/ || exit 1
 
-# 启动命令
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
 ```
 
@@ -312,31 +303,20 @@ FROM node:18-alpine AS builder
 
 WORKDIR /app
 
-# 复制依赖文件
 COPY package*.json ./
-
-# 安装依赖
 RUN npm ci
 
-# 复制源代码
 COPY . .
-
-# 构建应用
 RUN npm run build
 
 # 生产阶段
 FROM nginx:alpine
 
-# 复制构建产物
 COPY --from=builder /app/dist /usr/share/nginx/html
-
-# 复制 Nginx 配置
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
-# 暴露端口
 EXPOSE 80
 
-# 启动 Nginx
 CMD ["nginx", "-g", "daemon off;"]
 ```
 
@@ -414,14 +394,12 @@ server {
     ssl_ciphers HIGH:!aNULL:!MD5;
     ssl_prefer_server_ciphers on;
 
-    # 前端静态文件
     location / {
         root /path/to/frontend/dist;
         index index.html;
         try_files $uri $uri/ /index.html;
     }
 
-    # 后端 API 代理
     location /api {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
@@ -430,17 +408,14 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
-    # 限流配置
     limit_req_zone $binary_remote_addr zone=api_limit:10m rate=10r/s;
-    
+
     location /api {
         limit_req zone=api_limit burst=20 nodelay;
         proxy_pass http://127.0.0.1:8000;
-        # ... 其他配置
     }
 }
 
-# HTTP 重定向到 HTTPS
 server {
     listen 80;
     listen [::]:80;
@@ -498,7 +473,7 @@ server {
 后端日志配置（使用 Python logging）：
 
 ```python
-# backend/app/core/logging.py
+# backend/app/core/logging_config.py
 import logging
 from logging.handlers import RotatingFileHandler
 import sys
@@ -506,8 +481,7 @@ import sys
 def setup_logging():
     logger = logging.getLogger()
     logger.setLevel(logging.INFO)
-    
-    # 控制台输出
+
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter(
@@ -515,32 +489,36 @@ def setup_logging():
     )
     console_handler.setFormatter(console_formatter)
     logger.addHandler(console_handler)
-    
-    # 文件输出（轮转）
+
     file_handler = RotatingFileHandler(
         '/var/log/lab_agent/app.log',
-        maxBytes=10*1024*1024,  # 10 MB
+        maxBytes=10*1024*1024,
         backupCount=5
     )
     file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(console_formatter)
     logger.addHandler(file_handler)
-    
+
     return logger
 ```
 
 ### 健康检查端点
 
-后端已内置根路径健康检查：
+后端已内置健康检查端点：
 ```
-GET /
+GET /api/health
 ```
 
 响应：
 ```json
 {
-  "message": "实验室智能助手 - 后端 API",
-  "version": "2.0"
+  "status": "healthy",
+  "timestamp": 1704067200.123,
+  "version": "2.0",
+  "services": {
+    "vector_store": {"status": "ok", "doc_count": 100},
+    "api_key": {"status": "ok", "access_count": 5000}
+  }
 }
 ```
 
@@ -556,4 +534,4 @@ GET /
 ## 下一步
 
 - 查看 [常见问题解答](./faq.md) 解决部署问题
-- 查看 [配置指南](../backend/README.md#配置指南) 了解配置详情
+- 查看 [配置指南](./configuration.md) 了解配置详情

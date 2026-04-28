@@ -4,6 +4,8 @@ Configuration utilities with security auditing
 import json
 import os
 import logging
+import threading
+import itertools
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, Optional
@@ -63,7 +65,7 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 # JWT Configuration
 SECRET_KEY = os.getenv(
     "SECRET_KEY",
-    "your-secret-key-change-this-in-production-please-use-a-strong-key"
+    "FtDBiYTb51_kyEOuMzTF1UuIDJJFeublrFYakd_PLybx217qYygr44Lo-VbanTWk6S3ReprszGNBKXolJYPpUA"
 )
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440"))
@@ -73,7 +75,8 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
 
 # API key access tracking
-_api_key_access_count = 0
+_api_key_access_count = itertools.count(1)
+_api_key_access_lock = threading.Lock()
 _last_api_key_access: Optional[datetime] = None
 
 DEFAULT_CONFIG: Dict = {
@@ -87,7 +90,7 @@ DEFAULT_CONFIG: Dict = {
     "ollama_url": "http://localhost:11434",
     "ollama_model": "",
     "chunk_size": 1500,
-    "chunk_overlap": 100,
+    "chunk_overlap": 225,
     "temperature": 0.7,
     "top_k": 5,
     "top_p": 0.9,
@@ -98,10 +101,11 @@ DEFAULT_CONFIG: Dict = {
     "upload_max_size": 104857600,
     "allow_user_registration": False,
     "allow_pdf_conversion": False,
+    "pdf_conversion_method": "marker",
     "hybrid_search": {
         "enabled": True,
         "initial_retrieve_count": 20,
-        "final_select_count": 3,
+        "final_select_count": 5,
         "bm25_weight": 0.5,
         "embedding_weight": 0.5,
         "rerank_model": "BAAI/bge-reranker-v2-m3",
@@ -130,6 +134,22 @@ DEFAULT_CONFIG: Dict = {
         "skill_executor_shell": 60,
         "react_agent_subprocess": 60,
         "docx2markdown_subprocess": 300
+    },
+    "skills": {
+        "enabled": True,
+        "auto_discover": True,
+        "arxiv-watcher": {
+            "enabled": True,
+            "version": "1.0.0"
+        },
+        "amap-weather": {
+            "enabled": True,
+            "version": "1.0.0"
+        },
+        "arxiv_search": {
+            "enabled": True,
+            "max_results": 5
+        }
     }
 }
 
@@ -143,7 +163,19 @@ def ensure_data_dirs():
 
 
 def load_config() -> Dict:
-    """Load configuration from disk, excluding sensitive credentials"""
+    """
+    Load configuration from root config.json file.
+
+    Configuration is loaded with the following priority:
+    1. Root config.json file (primary source)
+    2. DEFAULT_CONFIG fallback (if config.json doesn't exist or is invalid)
+
+    Sensitive credentials (API keys) are NEVER loaded from config files,
+    they are ONLY loaded from environment variables.
+
+    Returns:
+        Dict: Configuration dictionary
+    """
     if not CONFIG_PATH.exists():
         save_config(DEFAULT_CONFIG)
     try:
@@ -161,7 +193,15 @@ def load_config() -> Dict:
 
 
 def save_config(cfg: Dict):
-    """Save configuration to disk, ensuring sensitive credentials are NOT saved"""
+    """
+    Save configuration to root config.json file.
+
+    IMPORTANT: Sensitive credentials are NEVER saved to disk.
+    Fields like 'openai_api_key' are explicitly excluded before saving.
+
+    Args:
+        cfg: Configuration dictionary to save
+    """
     # Create a copy of the config to avoid modifying the original
     safe_cfg = cfg.copy()
     # Remove sensitive fields before saving
@@ -173,26 +213,36 @@ def save_config(cfg: Dict):
 
 def _log_api_key_access():
     """Log API key access for security auditing"""
-    global _api_key_access_count, _last_api_key_access
+    global _last_api_key_access
     
-    _api_key_access_count += 1
-    _last_api_key_access = datetime.now()
+    with _api_key_access_lock:
+        count = next(_api_key_access_count) - 1
+        _last_api_key_access = datetime.now()
     
     security_logger.info(
-        f"API key accessed - Total accesses: {_api_key_access_count}, "
+        f"API key accessed - Total accesses: {count}, "
         f"Last access: {_last_api_key_access.isoformat()}"
     )
     
-    # Check for abnormal access patterns (example: more than 100 accesses per hour)
-    # This is a simple heuristic - in production, you may want more sophisticated monitoring
-    if _api_key_access_count > 100:
+    if count > 100:
         security_logger.warning(
-            f"High API key access count detected: {_api_key_access_count}"
+            f"High API key access count detected: {count}"
         )
 
 
 def get_complete_config() -> Dict:
-    """Get complete configuration with sensitive credentials from environment variables"""
+    """
+    Get complete configuration by merging disk config with sensitive environment variables.
+
+    This function:
+    1. Loads base configuration from root config.json
+    2. Overwrites sensitive credentials from environment variables:
+       - OPENAI_API_KEY
+       - OPENAI_BASE_URL
+
+    Returns:
+        Dict: Complete configuration with sensitive credentials
+    """
     cfg = load_config()
     # Add sensitive credentials from environment variables
     if OPENAI_API_KEY:

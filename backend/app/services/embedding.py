@@ -7,6 +7,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import List, Dict, Any
 from pathlib import Path
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -88,19 +89,9 @@ class LocalEmbeddingProvider(BaseEmbeddingProvider):
             raise RuntimeError("本地模型未初始化")
         
         try:
-            # 过滤掉空字符串
-            filtered_texts = []
-            for text in texts:
-                if text and text.strip():
-                    filtered_texts.append(text)
-                else:
-                    logger.warning("发现空字符串文本，跳过嵌入")
+            valid_texts = [t if (t and t.strip()) else " " for t in texts]
             
-            if not filtered_texts:
-                logger.error("没有有效的文本可嵌入（所有文本都是空的）")
-                raise ValueError("没有有效的文本可嵌入")
-            
-            embeddings = self._model.encode(filtered_texts, show_progress_bar=False)
+            embeddings = self._model.encode(valid_texts, show_progress_bar=False)
             return embeddings.tolist()
         except Exception as e:
             logger.error(f"本地嵌入失败: {e}")
@@ -154,20 +145,10 @@ class OpenAIEmbeddingProvider(BaseEmbeddingProvider):
     def embed_texts(self, texts):
         """调用OpenAI API进行嵌入"""
         try:
-            # 过滤掉空字符串
-            filtered_texts = []
-            for text in texts:
-                if text and text.strip():
-                    filtered_texts.append(text)
-                else:
-                    logger.warning("发现空字符串文本，跳过嵌入")
-            
-            if not filtered_texts:
-                logger.error("没有有效的文本可嵌入（所有文本都是空的）")
-                raise ValueError("没有有效的文本可嵌入")
+            valid_texts = [t if (t and t.strip()) else " " for t in texts]
             
             response = self._client.embeddings.create(
-                input=filtered_texts,
+                input=valid_texts,
                 model=self.model
             )
             return [r.embedding for r in response.data]
@@ -188,11 +169,12 @@ class EmbeddingService:
     _instance = None
     _provider = None
     _mode = None
+    _lock = threading.Lock()
     
     def __new__(cls):
-        """单例模式"""
-        if cls._instance is None:
-            cls._instance = super().__new__(cls)
+        with cls._lock:
+            if cls._instance is None:
+                cls._instance = super().__new__(cls)
         return cls._instance
     
     @classmethod

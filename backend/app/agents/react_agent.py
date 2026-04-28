@@ -282,6 +282,8 @@ class ReActAgent:
                     validated_params["count"] = 5
         
         elif action == "amap-weather":
+            if "location" in validated_params and "city" not in validated_params:
+                validated_params["city"] = validated_params["location"]
             if "city" not in validated_params:
                 validated_params["city"] = "宁波"
         

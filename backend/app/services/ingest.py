@@ -39,26 +39,99 @@ def extract_text(path: str) -> str:
                 for shape in slide.shapes:
                     if hasattr(shape, "text"):
                         text_parts.append(shape.text)
+        elif ext in (".xlsx", ".xls"):
+            # 使用 MarkItDown 进行 Excel 转 Markdown
+            text_parts.append(extract_excel_as_markdown(path))
         else:
             # fallback: try to read as text
             with open(path, "r", encoding="utf-8", errors="ignore") as f:
                 text_parts.append(f.read())
-    except Exception:
-        # return whatever we have
-        pass
+    except Exception as e:
+        logger.error(f"提取文本失败 ({path}): {e}")
     return "\n".join(text_parts)
+
+
+def extract_excel_as_markdown(excel_path: str) -> str:
+    """
+    使用 MarkItDown 将 Excel 文件转换为 Markdown 格式
+
+    Args:
+        excel_path: Excel 文件路径
+
+    Returns:
+        Markdown 格式的字符串
+    """
+    try:
+        # 首先尝试使用 MarkItDown
+        try:
+            from markitdown import MarkItDown
+
+            logger.info(f"使用 MarkItDown 转换 Excel 文件: {excel_path}")
+            md = MarkItDown()
+            result = md.convert(excel_path)
+            return result.text_content
+
+        except ImportError:
+            logger.warning("MarkItDown 未安装，尝试使用备选方案")
+        except Exception as e:
+            logger.warning(f"MarkItDown 转换失败: {e}，尝试备选方案")
+
+        # 备选方案：使用 openpyxl
+        try:
+            import openpyxl
+
+            logger.info(f"使用 openpyxl 转换 Excel 文件: {excel_path}")
+            wb = openpyxl.load_workbook(excel_path, data_only=True)
+            markdown_lines = []
+
+            for sheet_name in wb.sheetnames:
+                sheet = wb[sheet_name]
+                markdown_lines.append(f"## {sheet_name}\n")
+
+                for row_idx, row in enumerate(sheet.iter_rows(values_only=True), 1):
+                    if all(cell is None for cell in row):
+                        continue
+
+                    cells = []
+                    for cell in row:
+                        if cell is None:
+                            cells.append("")
+                        elif isinstance(cell, (int, float)):
+                            cells.append(str(cell))
+                        else:
+                            cell_str = str(cell)
+                            cell_str = cell_str.replace('|', '\\|')
+                            cells.append(cell_str.strip())
+
+                    markdown_lines.append("| " + " | ".join(cells) + " |")
+                    if row_idx == 1:
+                        markdown_lines.append("| " + " | ".join(["---"] * len(cells)) + " |")
+
+                markdown_lines.append("")
+            return "\n".join(markdown_lines)
+
+        except ImportError:
+            logger.error("openpyxl 未安装")
+            raise Exception("请安装 openpyxl 或 markitdown 库以支持 Excel 文件处理")
+        except Exception as e:
+            logger.error(f"openpyxl 转换失败: {e}")
+            raise
+
+    except Exception as e:
+        logger.error(f"Excel 文件处理失败: {e}")
+        raise
 
 
 def split_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> List[str]:
     if not text:
         return []
-    
+
     sections = _split_by_sections(text)
     if sections and len(sections) > 1:
         chunks = _merge_sections_to_chunks(sections, chunk_size, chunk_overlap)
         if chunks:
             return chunks
-    
+
     chunks = []
     step = chunk_size - chunk_overlap
     if step <= 0:
@@ -72,33 +145,33 @@ def split_text(text: str, chunk_size: int = 1000, chunk_overlap: int = 200) -> L
 def _split_by_sections(text: str) -> List[dict]:
     """
     按论文章节结构拆分文本，保留章节标题信息
-    
+
     Returns:
         章节列表，每个元素包含 title 和 content
     """
     import re
-    
+
     section_patterns = [
         r'^\s*(\d+\.?\s+[A-Z][a-zA-Z\s,:\-]+)',
         r'^\s*(Abstract|Introduction|Related Work|Method|Methodology|Experiment|Results|Discussion|Conclusion|References|Acknowledgment)',
-        r'^\s*(摘要|引言|相关工作|方法|实验|结果|讨论|结论|参考文献|致谢)',
+        r'^\s*(摘要|引言等相关工作|方法|实验|结果|讨论|结论|参考文献|致谢)',
         r'^\s*(\d+\.\d+\s+.+)',
     ]
-    
+
     combined_pattern = '|'.join(f'({p})' for p in section_patterns)
-    
+
     lines = text.split('\n')
     sections = []
     current_title = ""
     current_content = []
-    
+
     for line in lines:
         is_section_header = False
         for pattern in section_patterns:
             if re.match(pattern, line.strip()) and len(line.strip()) < 100:
                 is_section_header = True
                 break
-        
+
         if is_section_header and current_content:
             sections.append({
                 "title": current_title,
@@ -110,13 +183,13 @@ def _split_by_sections(text: str) -> List[dict]:
             current_title = line.strip()
         else:
             current_content.append(line)
-    
+
     if current_content:
         sections.append({
             "title": current_title,
             "content": "\n".join(current_content).strip()
         })
-    
+
     return sections
 
 
@@ -126,13 +199,13 @@ def _merge_sections_to_chunks(sections: List[dict], chunk_size: int, chunk_overl
     """
     chunks = []
     current_chunk = ""
-    
+
     for section in sections:
         title = section["title"]
         content = section["content"]
-        
+
         section_text = f"[{title}]\n{content}" if title else content
-        
+
         if len(current_chunk) + len(section_text) + 2 <= chunk_size:
             if current_chunk:
                 current_chunk += "\n\n" + section_text
@@ -141,7 +214,7 @@ def _merge_sections_to_chunks(sections: List[dict], chunk_size: int, chunk_overl
         else:
             if current_chunk:
                 chunks.append(current_chunk)
-            
+
             if len(section_text) <= chunk_size:
                 current_chunk = section_text
             else:
@@ -153,57 +226,57 @@ def _merge_sections_to_chunks(sections: List[dict], chunk_size: int, chunk_overl
                     if chunk_part.strip():
                         chunks.append(chunk_part)
                 current_chunk = ""
-    
+
     if current_chunk:
         chunks.append(current_chunk)
-    
+
     return chunks
 
 
 def generate_and_save_summary(
-    file_path: str, 
-    filename: str, 
-    file_text: str, 
+    file_path: str,
+    filename: str,
+    file_text: str,
     provider: str = "openai"
 ) -> bool:
     """
     生成并保存文件摘要
-    
+
     Args:
         file_path: 文件路径
         filename: 文件名
         file_text: 文件文本内容
         provider: LLM提供商
-        
+
     Returns:
         是否成功
     """
     cfg = load_config()
     summary_config = cfg.get("summary_search", {})
-    
+
     if not summary_config.get("auto_generate_summary", True):
         logger.info("自动生成摘要功能已关闭")
         return False
-    
+
     try:
         from app.services.document_summary import generate_document_summary
         from app.services.summary_store import save_document_summary
-        
+
         logger.info(f"开始生成文件摘要: {filename}")
-        
+
         summary = generate_document_summary(file_text, filename, provider)
         summary.file_path = os.path.relpath(file_path, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
-        
+
         # 保存摘要
         success = save_document_summary(summary)
-        
+
         if success:
             logger.info(f"文件摘要保存成功: {filename}, 质量评分: {summary.quality_score:.2f}")
         else:
             logger.error(f"文件摘要保存失败: {filename}")
-        
+
         return success
-        
+
     except Exception as e:
         logger.error(f"生成文件摘要时出错: {e}")
         import traceback
@@ -214,31 +287,38 @@ def generate_and_save_summary(
 def ingest_file(path: str, provider: str = "openai", generate_summary: bool = True) -> dict:
     """
     处理文件并添加到知识库
-    
+
     Args:
         path: 文件路径
         provider: LLM提供商
         generate_summary: 是否生成摘要
-        
+
     Returns:
         包含处理信息的字典
     """
     cfg = load_config()
     text = extract_text(path)
     filename = os.path.basename(path)
-    
+
     result = {
         "filename": filename,
         "chunks_count": 0,
         "summary_generated": False,
         "success": False
     }
-    
-    # 生成并保存摘要
+
+    try:
+        from app.services.vector_store import delete_documents_by_filename
+        deleted = delete_documents_by_filename(filename)
+        if deleted > 0:
+            logger.info(f"摄入前删除 {filename} 的 {deleted} 个旧文档片段（去重）")
+    except Exception as e:
+        logger.warning(f"摄入前去重删除失败: {e}")
+
     if generate_summary:
         summary_success = generate_and_save_summary(path, filename, text, provider)
         result["summary_generated"] = summary_success
-    
+
     chunks = split_text(text, cfg.get("chunk_size", 1000), cfg.get("chunk_overlap", 200))
     metas = []
     ids = []
@@ -256,5 +336,12 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
         result["chunks_count"] = len(chunks)
         result["success"] = True
         logger.info(f"文件 {filename} 处理完成，拆分为 {len(chunks)} 个文档片段")
-    
+
+        try:
+            from app.services.bm25_search import refresh_bm25_index
+            refresh_bm25_index()
+            logger.info(f"摄入后 BM25 索引已刷新")
+        except Exception as e:
+            logger.warning(f"摄入后 BM25 索引刷新失败: {e}")
+
     return result

@@ -64,8 +64,7 @@ class SkillSelector:
         """调用Ollama模型（非流式）"""
         from ollama import chat
         try:
-            # endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
-            model_name = "qwen3:4b-instruct"  # 可以从配置中获取模型名称
+            model_name = self.cfg.get("ollama_model", "qwen3:4b-instruct")
             logger.info(f"[SkillSelector-By-LLM] Calling Ollama with model: {model_name}")
             
             # 设置 stream=False 确保返回单个 JSON 对象而不是流式响应
@@ -142,7 +141,6 @@ class SkillSelector:
                 "input_parameters": skill.get("input_parameters", {})
             })
         
-        # LLM prompt
         prompt = f"""
 # Skill Selection Task
 
@@ -171,12 +169,38 @@ You are a skill selector for an AI assistant. Your task is to analyze the user's
   }}
 }}
 
+## Critical Decision Rules:
+
+### DEFAULT BEHAVIOR: Use Internal RAG Retrieval
+Most questions should be answered using the internal knowledge base (RAG retrieval), NOT by skills.
+Skills are ONLY for external API calls or specialized tools.
+
+### DO NOT Use Any Skill When:
+1. User asks about a specific person's papers/articles (e.g., "有没有钟鑫涛的文章", "张三发表了什么")
+2. User asks about internal/research group documents (e.g., "我们组的论文", "课题组的文章")
+3. User asks "有没有..." or "有没有关于..." WITHOUT mentioning "最新"/"latest"/"最近" — these imply searching local resources
+4. User asks about papers/documents that could reasonably exist in the local knowledge base, AND does NOT use time-sensitive keywords ("最新", "latest", "最近", "新的", "近期", "前沿", "最新进展")
+
+### MUST Use Skills When:
+1. User asks for the LATEST / newest / recent research, papers, or articles (keywords: "最新", "latest", "最近", "新的", "近期", "前沿", "最新进展", "最新的") — local KB cannot provide time-sensitive results, so arxiv-watcher MUST be used
+2. User EXPLICITLY requests external service (e.g., "在ArXiv上搜索", "查一下天气", "搜索文献", "检索论文")
+3. The question requires real-time external data (weather, current events, latest publications)
+4. The skill's description CLEARLY matches the user's intent
+
+## Key Distinction:
+- "有没有关于遥感图像融合的文章" → local RAG (checking existing knowledge)
+- "帮我搜索一下关于光谱超分的最新文章" → arxiv-watcher skill (needs real-time search)
+- "查查遥感方面的论文" → local RAG (ambiguous, default to local)
+- "最新的LLM研究进展" → arxiv-watcher skill (time-sensitive, needs external search)
+- "搜索关于图像分割的最新论文" → arxiv-watcher skill (explicit search + latest = external)
+
 ## Important Notes:
-- Set "should_use_skill" to true only if the question clearly matches a skill's purpose
+- The keyword "最新" (latest/newest) is a STRONG signal to use arxiv-watcher, because local KB cannot provide up-to-date research
+- "搜索" + "最新" together ALWAYS means use arxiv-watcher
+- "搜索" alone without "最新" → use local RAG
+- When in doubt about time-sensitivity, check if the question asks for "最新" or "latest" — if yes, use skill
 - Extract parameters directly from the question
 - If no skill matches, set "should_use_skill" to false and "skill_name" to null
-- Be conservative - only use skills when they are clearly relevant
-- **CRITICAL: Do NOT use any skill when the user asks about "our group" (我们组), "research group" (课题组), or internal documents/papers. These questions should be answered using internal RAG retrieval, not external skills.**
 - Output only the JSON, no other text
 """
         

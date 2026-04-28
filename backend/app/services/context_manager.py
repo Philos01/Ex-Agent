@@ -4,10 +4,12 @@
 """
 import logging
 import re
+import time
 from typing import List, Dict, Any, Optional
 from dataclasses import dataclass, asdict
 from enum import Enum
 import json
+import threading
 
 logger = logging.getLogger(__name__)
 
@@ -317,22 +319,37 @@ class ContextManager:
 
 # 全局上下文管理器实例
 _context_managers: Dict[str, ContextManager] = {}
+_context_managers_lock = threading.Lock()
+_context_managers_timestamps: Dict[str, float] = {}
+_MAX_CONTEXT_MANAGERS = 100
+_CONTEXT_TTL_SECONDS = 3600
+
+
+def _evict_expired_contexts():
+    """Evict expired context managers based on TTL"""
+    now = time.time()
+    expired = [
+        sid for sid, ts in _context_managers_timestamps.items()
+        if now - ts > _CONTEXT_TTL_SECONDS
+    ]
+    for sid in expired:
+        del _context_managers[sid]
+        del _context_managers_timestamps[sid]
+        logger.info(f"已淘汰过期上下文管理器: {sid}")
 
 
 def get_context_manager(session_id: str = "default", max_history: int = 5) -> ContextManager:
-    """
-    获取或创建会话的上下文管理器
-    
-    Args:
-        session_id: 会话ID
-        max_history: 最大历史轮次
-        
-    Returns:
-        ContextManager 实例
-    """
-    if session_id not in _context_managers:
-        _context_managers[session_id] = ContextManager(max_history=max_history)
-    return _context_managers[session_id]
+    with _context_managers_lock:
+        _evict_expired_contexts()
+        if session_id not in _context_managers:
+            if len(_context_managers) >= _MAX_CONTEXT_MANAGERS:
+                oldest_sid = min(_context_managers_timestamps, key=_context_managers_timestamps.get)
+                del _context_managers[oldest_sid]
+                del _context_managers_timestamps[oldest_sid]
+                logger.info(f"已淘汰最旧上下文管理器: {oldest_sid}")
+            _context_managers[session_id] = ContextManager(max_history=max_history)
+        _context_managers_timestamps[session_id] = time.time()
+        return _context_managers[session_id]
 
 
 def clear_context_manager(session_id: str = "default"):

@@ -6,8 +6,8 @@
 
 在开始之前，请确保您已安装：
 
-- Python 3.8 或更高版本
-- Node.js 16 或更高版本
+- Python 3.8 或更高版本（推荐 3.10+）
+- Node.js 16 或更高版本（推荐 18+）
 - Git（可选，用于克隆项目）
 - 4GB+ RAM（推荐 8GB+）
 
@@ -121,7 +121,20 @@ npm run dev
 
 ---
 
-## 第五步：上传文档测试
+## 第五步：创建管理员账户
+
+默认情况下，用户注册功能是关闭的。您需要手动创建管理员账户：
+
+```bash
+cd backend/scripts
+python manage_users.py create --username admin --email admin@example.com --password yourpassword --role admin
+```
+
+然后使用管理员账户登录前端。
+
+---
+
+## 第六步：上传文档测试
 
 1. 点击左侧导航栏的「知识库」
 2. 点击「选择文件」，选择一个或多个文档（支持 PDF、DOCX、TXT、MD 等格式）
@@ -130,7 +143,7 @@ npm run dev
 
 ---
 
-## 第六步：开始对话
+## 第七步：开始对话
 
 1. 点击左侧导航栏的「对话」
 2. 在输入框中输入问题，例如：
@@ -138,6 +151,83 @@ npm run dev
    - 「这篇论文的主要贡献是什么？」
 3. 点击发送按钮，等待系统回答
 4. 查看回答和引用的文档来源
+
+---
+
+## 常用操作
+
+### 切换 LLM 供应商
+
+系统支持 OpenAI 和 Ollama 两种 LLM 供应商。可以通过修改 `config.json` 或在设置页面切换：
+
+**使用 Ollama**:
+```json
+{
+  "provider": "ollama",
+  "ollama_url": "http://localhost:11434",
+  "ollama_model": "qwen3:4b-instruct"
+}
+```
+
+### 切换嵌入模式
+
+系统支持本地嵌入模型和 OpenAI 嵌入模型：
+
+**使用本地嵌入模型**:
+```json
+{
+  "embedding_mode": "local",
+  "local_embedding_model": "BAAI/bge-small-zh-v1.5"
+}
+```
+
+**使用 OpenAI 嵌入模型**:
+```json
+{
+  "embedding_mode": "openai",
+  "openai_embedding_model": "text-embedding-3-small"
+}
+```
+
+### 启用技能系统
+
+技能系统允许扩展系统能力，如 ArXiv 论文搜索、高德天气查询等。
+
+在 `skills_config.yaml` 中启用技能：
+```yaml
+global:
+  enabled: true
+
+amap-weather:
+  enabled: true
+
+arxiv-watcher:
+  enabled: true
+```
+
+---
+
+## 故障排除
+
+### 后端无法启动
+
+1. 检查 Python 版本是否满足要求（3.8+）
+2. 检查依赖是否正确安装
+3. 检查端口 8000 是否被占用
+
+### 前端无法连接后端
+
+1. 确认后端服务正在运行
+2. 检查 `vite.config.js` 中的代理配置
+3. 检查浏览器控制台的错误信息
+
+### 文档处理失败
+
+1. 检查文档格式是否支持
+2. 检查文档大小是否超过限制
+3. 查看后端终端的错误日志
+
+详细问题排查请查看 [常见问题解答](./faq.md)。
 
 ---
 

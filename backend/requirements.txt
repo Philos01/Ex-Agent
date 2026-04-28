@@ -1,45 +1,52 @@
 
 
 # Core Framework
-fastapi&gt;=0.104.0
-uvicorn[standard]&gt;=0.24.0
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
 
 # Database
-sqlalchemy&gt;=2.0.0
-psycopg2-binary&gt;=2.9.0
+sqlalchemy>=2.0.0
+psycopg2-binary>=2.9.0
 
-# Authentication &amp; Security
-bcrypt&gt;=4.0.0
-python-jose[cryptography]&gt;=3.3.0
-python-multipart&gt;=0.0.6
+# Authentication & Security
+bcrypt>=4.0.0
+python-jose[cryptography]>=3.3.0
+python-multipart>=0.0.6
 
 # Data Processing
-pydantic&gt;=2.5.0
-pydantic-settings&gt;=2.1.0
+pydantic>=2.5.0
+pydantic-settings>=2.1.0
 
 # Vector Database
-chromadb&gt;=0.4.0
-sentence-transformers&gt;=2.2.0
+chromadb>=0.4.0
+sentence-transformers>=2.2.0
 
 # File Processing
-python-magic&gt;=0.4.0
-pdfplumber&gt;=0.10.0
-python-docx&gt;=1.1.0
-mammoth&gt;=1.6.0
-openpyxl&gt;=3.1.0
+python-magic>=0.4.0
+pdfplumber>=0.10.0
+python-docx>=1.1.0
+mammoth>=1.6.0
+openpyxl>=3.1.0
+markitdown[pdf,xlsx]>=0.0.1
 
 # LLM Integration
-openai&gt;=1.0.0
+openai>=1.0.0
 
 # Utilities
-python-dotenv&gt;=1.0.0
-requests&gt;=2.31.0
+python-dotenv>=1.0.0
+requests>=2.31.0
 
 # Hybrid Search Dependencies
-jieba&gt;=0.42.1
-torch&gt;=2.0.0
-transformers&gt;=4.35.0
+jieba>=0.42.1
+torch>=2.0.0
+transformers>=4.35.0
 
 # Skills Dependencies
-feedparser&gt;=6.0.0
-PyYAML&gt;=6.0.0
+feedparser>=6.0.0
+PyYAML>=6.0.0
+
+# Testing
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-cov>=4.1.0
+httpx>=0.25.0

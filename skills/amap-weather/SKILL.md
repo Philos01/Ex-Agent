@@ -12,7 +12,7 @@ description: >
 
 ## Prerequisites
 
-- `AMAP_API_KEY`:28dec777e55748ec364901b0827cb930
+- `AMAP_API_KEY`: Set via environment variable (see `.env.example`). Never hardcode API keys in source files.
 - Apply at https://lbs.amap.com → 控制台 → 应用管理 → 创建应用 → 添加 Key (Web服务类型)
 
 ## Quick Usage

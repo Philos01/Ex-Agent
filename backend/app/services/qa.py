@@ -187,7 +187,9 @@ def _get_openai_client(cfg):
     if base_url:
         client_kwargs["base_url"] = base_url
     
-    print(f"[DEBUG] OpenAI Client config: {client_kwargs}")
+    safe_kwargs = {k: ("***REDACTED***" if k == "api_key" else v) for k, v in client_kwargs.items()}
+    logger.debug("OpenAI Client config: %s", safe_kwargs)
+    client_kwargs["timeout"] = 60.0
     return OpenAI(**client_kwargs)
 
 
@@ -382,7 +384,8 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                   top_p: float = None, max_tokens: int = None, 
                   presence_penalty: float = None, frequency_penalty: float = None,
                   enable_thinking: bool = None, use_react: bool = None,
-                  messages: List[dict] = None, include_state: bool = False):
+                  messages: List[dict] = None, include_state: bool = False,
+                  use_skill: bool = None, skill_name: str = None, skill_params: dict = None):
     """
     流式回答问题
     
@@ -407,36 +410,47 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         return
     cfg = get_complete_config()
     
-    # 检查是否需要使用技能
-    skill_manager = get_skill_manager()
-    use_skill, skill_name, skill_params = skill_manager.should_use_skill(question, provider=provider)
+    if use_skill is not None and skill_name is not None:
+        should_use_skill_flag = use_skill
+        resolved_skill_name = skill_name
+        resolved_skill_params = skill_params or {}
+    else:
+        skill_manager = get_skill_manager()
+        should_use_skill_flag, resolved_skill_name, resolved_skill_params = skill_manager.should_use_skill(question, provider=provider)
     
     print(f"[QA DEBUG] Question: {question}")
-    print(f"[QA DEBUG] Use skill: {use_skill}")
-    print(f"[QA DEBUG] Skill name: {skill_name}")
-    print(f"[QA DEBUG] Skill params: {skill_params}")
+    print(f"[QA DEBUG] Use skill: {should_use_skill_flag}")
+    print(f"[QA DEBUG] Skill name: {resolved_skill_name}")
+    print(f"[QA DEBUG] Skill params: {resolved_skill_params}")
     
     skill_result_text = ""
     docs = []
     sources = []
     
-    if use_skill and skill_name and skill_params:
-        # 使用技能，不进行 RAG 检索
+    if should_use_skill_flag and resolved_skill_name and resolved_skill_params:
         print(f"[QA DEBUG] Using skill mode - skipping RAG retrieval")
         if include_state:
-            yield {"type": "state", "phase": "skill_call", "message": f"正在调用 {skill_name} 技能...", "progress": 10}
+            yield {"type": "state", "phase": "skill_call", "message": f"正在调用 {resolved_skill_name} 技能...", "progress": 10}
         
-        skill_result = skill_manager.execute_skill(skill_name, **skill_params)
-        skill_result_text = skill_manager.format_skill_result(skill_result)
+        skill_mgr = get_skill_manager()
+        skill_result = skill_mgr.execute_skill(resolved_skill_name, **resolved_skill_params)
         
-        # 发送技能结果事件，供前端保存到对话历史
-        yield {"type": "skill_result", "skill_name": skill_name, "result": skill_result_text}
-        
-        if include_state:
-            yield {"type": "state", "phase": "skill_call", "message": f"{skill_name} 技能执行完成", "progress": 40}
-        
-        context = f"## 技能执行结果\n{skill_result_text}"
-        print(f"[QA DEBUG] Context (skill mode): {context}...")
+        if not skill_result.get("success", False):
+            logger.warning(f"技能 {resolved_skill_name} 执行失败，降级到 RAG 检索")
+            print(f"[QA DEBUG] Skill failed, falling back to RAG retrieval")
+            should_use_skill_flag = False
+            resolved_skill_name = None
+            docs = _retrieve_documents(question, provider, top_k)
+            context = "\n\n".join([d.get("text", "") for d in docs])
+            if include_state:
+                yield {"type": "state", "phase": "retrieving", "message": "技能执行失败，已降级到知识库检索...", "progress": 25}
+        else:
+            skill_result_text = skill_mgr.format_skill_result(skill_result)
+            yield {"type": "skill_result", "skill_name": resolved_skill_name, "result": skill_result_text}
+            if include_state:
+                yield {"type": "state", "phase": "skill_call", "message": f"{resolved_skill_name} 技能执行完成", "progress": 40}
+            context = f"## 技能执行结果\n{skill_result_text}"
+            print(f"[QA DEBUG] Context (skill mode): {context}...")
     else:
         # 不使用技能，进行正常的 RAG 检索
         print(f"[QA DEBUG] Using RAG mode")
@@ -487,7 +501,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     
     # 如果当前轮次使用了技能，将技能结果添加到上下文
     current_skill_context = ""
-    if use_skill and skill_result_text:
+    if should_use_skill_flag and skill_result_text:
         current_skill_context = f"## 当前技能执行结果\n{skill_result_text}\n"
     
     # 获取当前时间（北京时间）
@@ -498,7 +512,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     current_year = current_datetime.year
     
     # 根据是否使用技能，调整 prompt
-    if use_skill and skill_name:
+    if should_use_skill_flag and resolved_skill_name:
         # 使用技能模式的 prompt
         prompt = f"""
 # Role: 宁波大学 RS-NBU 课题组专属学术助理 (RS-NBU Academic AI Assistant)
@@ -683,14 +697,12 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         return chunk
 
     # 发送分析阶段状态 - 仅在RAG模式
-    if include_state and not use_skill:
+    if include_state and not should_use_skill_flag:
         yield {"type": "state", "phase": "analyzing", "message": "正在分析检索结果...", "progress": 50}
     
-    # 发送生成阶段状态
     if include_state:
-        if use_skill:
-            # 技能模式的生成状态
-            yield {"type": "state", "phase": "generating", "message": f"正在基于 {skill_name} 结果生成回答...", "progress": 75}
+        if should_use_skill_flag:
+            yield {"type": "state", "phase": "generating", "message": f"正在基于 {resolved_skill_name} 结果生成回答...", "progress": 75}
         else:
             # RAG模式的生成状态
             yield {"type": "state", "phase": "generating", "message": f"正在使用 {provider} 模型生成回答...", "progress": 75}

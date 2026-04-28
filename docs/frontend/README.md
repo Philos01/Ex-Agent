@@ -125,11 +125,10 @@ const router = createRouter({
   routes
 })
 
-// 路由守卫
 router.beforeEach((to, from, next) => {
   const appStore = useAppStore()
   const token = localStorage.getItem('auth_token')
-  
+
   if (to.meta.requiresAuth && !token) {
     next('/login')
   } else if (to.path === '/login' && token) {
@@ -151,17 +150,14 @@ import { ref, computed } from 'vue'
 import api from '../services/api'
 
 export const useAppStore = defineStore('app', () => {
-  // 状态
   const user = ref(null)
   const config = ref(null)
   const currentSession = ref(null)
   const messages = ref([])
   const isLoading = ref(false)
-  
-  // 计算属性
+
   const isAuthenticated = computed(() => !!user.value)
-  
-  // 动作
+
   async function login(credentials) {
     try {
       const response = await api.post('/auth/login', credentials)
@@ -174,13 +170,13 @@ export const useAppStore = defineStore('app', () => {
       return false
     }
   }
-  
+
   function logout() {
     user.value = null
     localStorage.removeItem('auth_token')
     localStorage.removeItem('user_info')
   }
-  
+
   async function fetchUserInfo() {
     try {
       const response = await api.get('/auth/me')
@@ -190,7 +186,7 @@ export const useAppStore = defineStore('app', () => {
       console.error('Failed to fetch user info:', error)
     }
   }
-  
+
   async function fetchConfig() {
     try {
       const response = await api.get('/config')
@@ -199,7 +195,7 @@ export const useAppStore = defineStore('app', () => {
       console.error('Failed to fetch config:', error)
     }
   }
-  
+
   async function updateConfig(newConfig) {
     try {
       const response = await api.post('/config', newConfig)
@@ -210,7 +206,7 @@ export const useAppStore = defineStore('app', () => {
       return false
     }
   }
-  
+
   async function sendMessage(question, options = {}) {
     isLoading.value = true
     try {
@@ -221,7 +217,7 @@ export const useAppStore = defineStore('app', () => {
       }, {
         responseType: 'stream'
       })
-      
+
       return handleStreamResponse(response)
     } catch (error) {
       console.error('Failed to send message:', error)
@@ -230,30 +226,30 @@ export const useAppStore = defineStore('app', () => {
       isLoading.value = false
     }
   }
-  
+
   function handleStreamResponse(response) {
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let sources = []
     let answer = ''
-    
+
     return {
       async *[Symbol.asyncIterator]() {
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          
+
           const chunk = decoder.decode(value)
           const lines = chunk.split('\n')
-          
+
           for (const line of lines) {
             if (line.startsWith('data: ')) {
               const data = line.slice(6)
               if (data === '[DONE]') continue
-              
+
               try {
                 const parsed = JSON.parse(data)
-                
+
                 if (parsed.sources) {
                   sources = parsed.sources
                   yield { type: 'sources', data: sources }
@@ -265,28 +261,28 @@ export const useAppStore = defineStore('app', () => {
                 if (parsed.state) {
                   yield { type: 'state', data: parsed.state }
                 }
+                if (parsed.thinking) {
+                  yield { type: 'thinking', data: parsed.thinking }
+                }
               } catch (e) {
                 // 忽略解析错误
               }
             }
           }
         }
-        
+
         yield { type: 'done', answer, sources }
       }
     }
   }
-  
+
   return {
-    // 状态
     user,
     config,
     currentSession,
     messages,
     isLoading,
-    // 计算属性
     isAuthenticated,
-    // 动作
     login,
     logout,
     fetchUserInfo,
@@ -310,7 +306,6 @@ const api = axios.create({
   }
 })
 
-// 请求拦截器 - 添加认证 token
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token')
@@ -324,7 +319,6 @@ api.interceptors.request.use(
   }
 )
 
-// 响应拦截器 - 处理认证错误
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -346,7 +340,6 @@ export default api
 <!-- frontend/src/views/ChatView.vue -->
 <template>
   <div class="chat-view h-screen flex flex-col">
-    <!-- 消息列表 -->
     <div class="flex-1 overflow-y-auto p-4">
       <div class="max-w-4xl mx-auto space-y-4">
         <div
@@ -362,8 +355,11 @@ export default api
               助手
             </div>
             <div v-html="formatMarkdown(message.content)"></div>
-            
-            <!-- 引用来源 -->
+
+            <div v-if="message.thinking" class="mt-3">
+              <ThinkingSteps :steps="message.thinking" />
+            </div>
+
             <div v-if="message.sources && message.sources.length > 0" class="mt-3">
               <div class="text-sm text-gray-600 mb-1">引用来源:</div>
               <div class="flex flex-wrap gap-2">
@@ -380,16 +376,14 @@ export default api
             </div>
           </div>
         </div>
-        
-        <!-- 加载指示器 -->
+
         <div v-if="isLoading" class="loading-indicator">
           <div class="spinner"></div>
           <span class="ml-2">正在思考...</span>
         </div>
       </div>
     </div>
-    
-    <!-- 输入区域 -->
+
     <div class="border-t p-4">
       <div class="max-w-4xl mx-auto">
         <form @submit.prevent="handleSubmit" class="flex gap-2">
@@ -410,8 +404,7 @@ export default api
         </form>
       </div>
     </div>
-    
-    <!-- 文档预览悬浮卡片 -->
+
     <CitationHoverCard
       v-if="hoveredSource"
       :source="hoveredSource"
@@ -425,6 +418,7 @@ import { ref, onMounted } from 'vue'
 import { useAppStore } from '../stores/appStore'
 import { marked } from 'marked'
 import CitationHoverCard from '../components/gen-ui/CitationHoverCard.vue'
+import ThinkingSteps from '../components/gen-ui/ThinkingSteps.vue'
 
 const appStore = useAppStore()
 const messages = ref([])
@@ -439,33 +433,35 @@ function formatMarkdown(text) {
 
 async function handleSubmit() {
   if (!inputMessage.value.trim() || isLoading.value) return
-  
+
   const question = inputMessage.value.trim()
   inputMessage.value = ''
-  
-  // 添加用户消息
+
   messages.value.push({
     role: 'user',
     content: question
   })
-  
+
   isLoading.value = true
-  
+
   try {
     const stream = await appStore.sendMessage(question)
     let assistantMessage = {
       role: 'assistant',
       content: '',
-      sources: []
+      sources: [],
+      thinking: []
     }
-    
+
     messages.value.push(assistantMessage)
-    
+
     for await (const event of stream) {
       if (event.type === 'sources') {
         assistantMessage.sources = event.data
       } else if (event.type === 'content') {
         assistantMessage.content += event.data
+      } else if (event.type === 'thinking') {
+        assistantMessage.thinking = event.data
       } else if (event.type === 'done') {
         assistantMessage.content = event.answer
         assistantMessage.sources = event.sources
@@ -571,10 +567,10 @@ onMounted(() => {
 ```
 frontend/
 ├── src/
-│   ├── main.js                  # 应用入口
-│   ├── App.vue                  # 根组件
-│   ├── App.jsx                  # React 根组件（备用）
+│   ├── main.js                  # Vue 3 应用入口
 │   ├── main.jsx                 # React 入口（备用）
+│   ├── App.vue                  # Vue 根组件
+│   ├── App.jsx                  # React 根组件（备用）
 │   ├── styles.css               # 全局样式
 │   ├── components/              # 组件
 │   │   ├── Chat.jsx            # 聊天组件
@@ -582,20 +578,20 @@ frontend/
 │   │   ├── Uploads.jsx         # 上传组件
 │   │   ├── ErrorBoundary.jsx   # 错误边界
 │   │   └── gen-ui/             # 通用 UI 组件
-│   │       ├── CitationHoverCard.vue
-│   │       ├── ComponentRegistry.js
-│   │       ├── DataChart.vue
-│   │       ├── DataTable.vue
-│   │       ├── DocumentPreviewPanel.vue
-│   │       ├── JsonDisplay.vue
-│   │       ├── JsonNode.vue
-│   │       ├── ReActModePrompt.vue
-│   │       ├── ReActThinkingDisplay.vue
-│   │       └── ThinkingSteps.vue
+│   │       ├── CitationHoverCard.vue # 引用悬停卡片
+│   │       ├── ComponentRegistry.js # 组件注册表
+│   │       ├── DataChart.vue        # 数据图表
+│   │       ├── DataTable.vue        # 数据表格
+│   │       ├── DocumentPreviewPanel.vue # 文档预览面板
+│   │       ├── JsonDisplay.vue      # JSON 显示
+│   │       ├── JsonNode.vue         # JSON 节点
+│   │       ├── ReActModePrompt.vue  # ReAct 模式提示
+│   │       ├── ReActThinkingDisplay.vue # ReAct 思考显示
+│   │       └── ThinkingSteps.vue    # 思考步骤
 │   ├── views/                   # 页面视图
 │   │   ├── ChatView.vue        # 聊天页面
 │   │   ├── LoginView.vue       # 登录页面
-│   │   ├── SettingsView.vue    # 设置页面
+│   │   ├── SettingsView.vue     # 设置页面
 │   │   └── UploadsView.vue     # 上传页面
 │   ├── router/                  # 路由
 │   │   └── index.js
@@ -688,7 +684,7 @@ VITE_API_BASE_URL=http://localhost:8000/api
 
 ### 系统要求
 
-- Node.js 16+
+- Node.js 16+ (推荐 18+)
 - npm 7+
 
 ### 步骤 1：安装依赖
