@@ -61,7 +61,7 @@ class HybridSearchService:
         
         enabled = hybrid_config.get("enabled", True)
         if not enabled:
-            logger.info("混合检索未启用，使用纯向量检索")
+            logger.info("Hybrid search disabled, using pure vector search")
             return vector_search(query, top_k=hybrid_config.get("final_select_count", 3))
         
         initial_count = initial_count or hybrid_config.get("initial_retrieve_count", 20)
@@ -69,11 +69,11 @@ class HybridSearchService:
         bm25_weight = bm25_weight if bm25_weight is not None else hybrid_config.get("bm25_weight", 0.5)
         embedding_weight = embedding_weight if embedding_weight is not None else hybrid_config.get("embedding_weight", 0.5)
         
-        logger.info(f"开始混合检索: query='{query}', initial_count={initial_count}, final_count={final_count}")
+        logger.info("Hybrid search: query='%s', initial=%d, final=%d", query, initial_count, final_count)
         
         # 1. 查询改写（除非被明确跳过）
         if not skip_query_rewrite:
-            logger.info(f"[DEBUG] 开始查询改写，原始查询: '{query}', provider: {provider}")
+            logger.debug("Rewriting query: '%s'", query)
             query_rewrite_service = get_query_rewrite_service()
             rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider)
             
@@ -83,13 +83,13 @@ class HybridSearchService:
                 rewritten_query = query
             
             if rewritten_query != query:
-                logger.info(f"查询改写成功: '{query}' -> '{rewritten_query}'")
+                logger.debug("Query rewritten: '%s' -> '%s'", query, rewritten_query)
             else:
-                logger.info(f"使用原始查询: '{query}'")
-            
-            logger.info(f"[DEBUG] 最终用于检索的查询: '{rewritten_query}'")
+                logger.debug("Using original query: '%s'", query)
+
+            logger.debug("Final search query: '%s'", rewritten_query)
         else:
-            logger.info(f"[DEBUG] 跳过查询改写，直接使用传入的查询: '{query}'")
+            logger.debug("Skip query rewrite, using: '%s'", query)
             rewritten_query = query
             # 验证传入的查询
             if not rewritten_query or not rewritten_query.strip():
@@ -112,14 +112,14 @@ class HybridSearchService:
         
         # 计算耗时
         elapsed_time = time.time() - start_time
-        logger.info(f"混合检索完成，耗时 {elapsed_time:.2f}s，返回 {len(reranked_docs)} 个结果")
+        logger.info("Hybrid search done in %.2fs, returned %d results", elapsed_time, len(reranked_docs))
         
         return reranked_docs
     
     def _search_bm25(self, query: str, top_k: int) -> List[Dict]:
         """执行 BM2.5 检索"""
         try:
-            logger.info(f"[DEBUG] BM2.5 检索使用查询: '{query}'")
+            logger.debug("BM25 search using: '%s'", query)
             bm25_retriever = get_bm25_retriever()
             docs = bm25_retriever.search(query, top_k=top_k)
             # 标准化分数到 [0, 1]
@@ -128,7 +128,7 @@ class HybridSearchService:
                 if max_score > 0:
                     for doc in docs:
                         doc["score"] = doc["score"] / max_score
-            logger.info(f"BM2.5 检索到 {len(docs)} 个结果")
+            logger.debug("BM25 returned %d results", len(docs))
             return docs
         except Exception as e:
             logger.error(f"BM2.5 检索失败: {e}")
@@ -137,14 +137,14 @@ class HybridSearchService:
     def _search_vector(self, query: str, top_k: int) -> List[Dict]:
         """执行向量检索"""
         try:
-            logger.info(f"[DEBUG] 向量检索使用查询: '{query}'")
+            logger.debug("Vector search using: '%s'", query)
             from app.services.vector_store import search_with_distances
             results = search_with_distances(query, top_k=top_k)
             if results:
                 for doc in results:
                     distance = doc.get("distance", 1.0)
                     doc["score"] = 1.0 / (1.0 + distance)
-            logger.info(f"向量检索到 {len(results)} 个结果")
+            logger.debug("Vector search returned %d results", len(results))
             return results
         except Exception as e:
             logger.error(f"向量检索失败: {e}")
@@ -205,7 +205,7 @@ class HybridSearchService:
         # 取前 top_k 个
         result = sorted_docs[:top_k]
         
-        logger.info(f"结果融合完成，共有 {len(result)} 个唯一文档")
+        logger.debug("Fusion done: %d unique docs", len(result))
         return result
 
 

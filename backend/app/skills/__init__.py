@@ -1,35 +1,39 @@
-
 """
 Skills Package - Extensible skill system for the AI assistant
 
 This package provides:
-- BaseSkill: Abstract base class for all skills
-- Skill discovery and auto-loading
 - Skill management and execution
+- Skill selection via LLM
+- Skill registry with versioning and permissions
+- Parameter validation
 - Progressive disclosure system (3-tier information loading)
-- Configuration management
-- Unified SkillManager: Combines both legacy and package-based skill systems
+- Package-based skill system
 """
 
-from app.skills.base import BaseSkill
-from app.skills.discovery import skill, SkillDiscoverer, get_skill_discoverer, discover_skills
 from app.skills.skill_manager import SkillManager, get_skill_manager
-
-# Backward compatibility aliases
-NewSkillManager = SkillManager
-get_new_skill_manager = get_skill_manager
+from app.skills.registry import SkillRegistry, SkillDefinition
+from app.skills.validator import ParameterValidator, ValidationError
+from app.skills.permission import PermissionControl, PermissionRule, Role
+from app.skills.versioning import VersionManager, SemVer, MigrationStep
 
 __all__ = [
-    "BaseSkill",
-    "skill",
-    "SkillDiscoverer",
-    "get_skill_discoverer",
-    "discover_skills",
+    # Manager
     "SkillManager",
     "get_skill_manager",
-    "NewSkillManager",
-    "get_new_skill_manager"
+    # Registry
+    "SkillRegistry",
+    "SkillDefinition",
+    # Validation
+    "ParameterValidator",
+    "ValidationError",
+    # Permissions
+    "PermissionControl",
+    "PermissionRule",
+    "Role",
+    # Versioning
+    "VersionManager",
+    "SemVer",
+    "MigrationStep",
 ]
 
-__version__ = "4.0.0"
-
+__version__ = "5.0.0"

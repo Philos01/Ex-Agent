@@ -9,11 +9,14 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, desc
 
+import logging
 from app.core.dependencies import get_db, get_current_user
 from app.models.user import User
 from app.models.session import Session as ChatSession
 from app.models.message import Message
 
+
+logger = logging.getLogger(__name__)
 
 BEIJING_TZ = ZoneInfo('Asia/Shanghai')
 
@@ -40,7 +43,7 @@ def format_beijing_time(dt):
         # 格式化为 HH:MM
         return dt_beijing.strftime('%H:%M')
     except Exception as e:
-        print(f'[DEBUG] Error formatting time: {e}')
+        logger.debug("Error formatting time: %s", e)
         return None
 
 
@@ -60,7 +63,7 @@ def safe_isoformat(dt):
         
         return dt_beijing.isoformat()
     except Exception as e:
-        print(f'[DEBUG] Error converting to ISO format: {e}')
+        logger.debug("Error converting to ISO format: %s", e)
         return None
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
@@ -302,8 +305,13 @@ def add_message(
     from sqlalchemy.sql import func
     session.updated_at = func.now()
     session.message_count = (session.message_count or 0) + 1
-    # Update preview with the new content (truncate if too long)
+    
+    # 更新预览内容（取前200字符）
     session.last_message_preview = message_data.content[:200]
+    
+    # 如果是第一条用户消息，自动更新会话名称为消息预览
+    if message_data.role == 'user' and session.message_count <= 2:
+        session.session_name = message_data.content[:50]  # 标题取前50字符
     
     db.commit()
     db.refresh(new_message)

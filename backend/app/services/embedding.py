@@ -197,8 +197,7 @@ class EmbeddingService:
                 model_name = config.get("local_embedding_model", "BAAI/bge-small-zh-v1.5")
                 cache_dir = config.get("local_model_cache_dir")
                 cls._provider = LocalEmbeddingProvider(model_name=model_name, cache_dir=cache_dir)
-                logger.info("已切换到本地嵌入模式")
-                print(f"推荐的本地嵌入模型: {model_name}")
+                logger.info("Switched to local embedding mode, model: %s", model_name)
             
             elif mode == "openai":
                 # OpenAI模式

@@ -262,7 +262,7 @@ def generate_and_save_summary(
         from app.services.document_summary import generate_document_summary
         from app.services.summary_store import save_document_summary
 
-        logger.info(f"开始生成文件摘要: {filename}")
+        logger.info("Generating summary for: %s", filename)
 
         summary = generate_document_summary(file_text, filename, provider)
         summary.file_path = os.path.relpath(file_path, os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))))
@@ -271,31 +271,18 @@ def generate_and_save_summary(
         success = save_document_summary(summary)
 
         if success:
-            logger.info(f"文件摘要保存成功: {filename}, 质量评分: {summary.quality_score:.2f}")
+            logger.info("Summary saved: %s (score: %.2f)", filename, summary.quality_score)
         else:
-            logger.error(f"文件摘要保存失败: {filename}")
+            logger.error("Summary save failed: %s", filename)
 
         return success
 
     except Exception as e:
-        logger.error(f"生成文件摘要时出错: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Summary generation error: %s", e, exc_info=True)
         return False
 
 
 def ingest_file(path: str, provider: str = "openai", generate_summary: bool = True) -> dict:
-    """
-    处理文件并添加到知识库
-
-    Args:
-        path: 文件路径
-        provider: LLM提供商
-        generate_summary: 是否生成摘要
-
-    Returns:
-        包含处理信息的字典
-    """
     cfg = load_config()
     text = extract_text(path)
     filename = os.path.basename(path)
@@ -303,6 +290,7 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
     result = {
         "filename": filename,
         "chunks_count": 0,
+        "parent_count": 0,
         "summary_generated": False,
         "success": False
     }
@@ -311,7 +299,7 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
         from app.services.vector_store import delete_documents_by_filename
         deleted = delete_documents_by_filename(filename)
         if deleted > 0:
-            logger.info(f"摄入前删除 {filename} 的 {deleted} 个旧文档片段（去重）")
+            logger.debug("Deleted %d old chunks for %s before ingest", deleted, filename)
     except Exception as e:
         logger.warning(f"摄入前去重删除失败: {e}")
 
@@ -319,29 +307,86 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
         summary_success = generate_and_save_summary(path, filename, text, provider)
         result["summary_generated"] = summary_success
 
-    chunks = split_text(text, cfg.get("chunk_size", 1000), cfg.get("chunk_overlap", 200))
-    metas = []
-    ids = []
-    for i, c in enumerate(chunks):
-        metas.append({
-            "source": filename,
-            "chunk_index": i,
-            "total_chunks": len(chunks),
-            "ingest_time": datetime.datetime.utcnow().isoformat(),
-            "file_type": os.path.splitext(path)[1].lower(),
-        })
-        ids.append(str(uuid4()))
-    if chunks:
-        add_documents(ids=ids, documents=chunks, metadatas=metas, provider=provider)
-        result["chunks_count"] = len(chunks)
-        result["success"] = True
-        logger.info(f"文件 {filename} 处理完成，拆分为 {len(chunks)} 个文档片段")
+    pdr_config = cfg.get("parent_document_retrieval", {})
+    use_parent_mode = pdr_config.get("enabled", False)
 
-        try:
-            from app.services.bm25_search import refresh_bm25_index
-            refresh_bm25_index()
-            logger.info(f"摄入后 BM25 索引已刷新")
-        except Exception as e:
-            logger.warning(f"摄入后 BM25 索引刷新失败: {e}")
+    if use_parent_mode and (filename.endswith('.md') or filename.endswith('.txt')):
+        from app.services.parent_document import generate_parent_documents, generate_child_chunks
+        from app.services.parent_store import ParentDocumentStore
+
+        parent_chunk_size = pdr_config.get("parent_max_chars", 8000)
+        child_chunk_size = pdr_config.get("child_chunk_size", 300)
+        child_chunk_overlap = pdr_config.get("child_chunk_overlap", 60)
+
+        parents = generate_parent_documents(
+            text, filename,
+            min_parent_chars=pdr_config.get("parent_min_chars", 300),
+            max_parent_chars=parent_chunk_size
+        )
+        result["parent_count"] = len(parents)
+
+        all_children = []
+        for parent in parents:
+            children = generate_child_chunks(
+                parent,
+                child_chunk_size=child_chunk_size,
+                child_chunk_overlap=child_chunk_overlap
+            )
+            all_children.extend(children)
+
+        parent_store = ParentDocumentStore()
+        parent_store.delete_by_filename(filename)
+        parent_store.save_parents(parents)
+
+        child_ids = [f"{c['parent_id']}_{c['chunk_index']}" for c in all_children]
+        child_texts = [c['text'] for c in all_children]
+        child_metas = [
+            {
+                "source": c['filename'],
+                "chunk_index": c['chunk_index'],
+                "parent_id": c['parent_id'],
+                "section_title": c['section_title'],
+                "chunk_type": "child",
+                "ingest_time": datetime.datetime.utcnow().isoformat(),
+                "file_type": os.path.splitext(path)[1].lower(),
+            }
+            for c in all_children
+        ]
+
+        if child_texts:
+            add_documents(ids=child_ids, documents=child_texts, metadatas=child_metas, provider=provider)
+            result["chunks_count"] = len(child_texts)
+            result["success"] = True
+            logger.info(
+                "Ingest complete (parent mode): %s → %d parents + %d children",
+                filename, len(parents), len(child_texts)
+            )
+
+    else:
+        chunks = split_text(text, cfg.get("chunk_size", 1500), cfg.get("chunk_overlap", 225))
+        metas = []
+        ids = []
+        for i, c in enumerate(chunks):
+            metas.append({
+                "source": filename,
+                "chunk_index": i,
+                "total_chunks": len(chunks),
+                "chunk_type": "legacy",
+                "ingest_time": datetime.datetime.utcnow().isoformat(),
+                "file_type": os.path.splitext(path)[1].lower(),
+            })
+            ids.append(str(uuid4()))
+        if chunks:
+            add_documents(ids=ids, documents=chunks, metadatas=metas, provider=provider)
+            result["chunks_count"] = len(chunks)
+            result["success"] = True
+            logger.info("Ingest complete (legacy mode): %s → %d chunks", filename, len(chunks))
+
+    try:
+        from app.services.bm25_search import refresh_bm25_index
+        refresh_bm25_index()
+        logger.debug("BM25 index refreshed after ingest")
+    except Exception as e:
+        logger.warning("BM25 index refresh failed after ingest: %s", e)
 
     return result

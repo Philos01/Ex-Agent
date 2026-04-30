@@ -36,7 +36,7 @@ async def list_skills():
     """
     try:
         from app.skills import get_skill_manager
-        skill_manager = get_new_skill_manager()
+        skill_manager = get_skill_manager()
         skills = skill_manager.list_skills()
         return {
             "success": True,
@@ -61,7 +61,7 @@ async def get_skill_metadata(skill_name: str):
     """
     try:
         from app.skills import get_skill_manager
-        skill_manager = get_new_skill_manager()
+        skill_manager = get_skill_manager()
         skills = skill_manager.list_skills()
         skill_info = next((s for s in skills if s["name"] == skill_name), None)
         
@@ -171,7 +171,7 @@ async def execute_skill(request: SkillExecuteRequest):
     """
     try:
         from app.skills import get_skill_manager
-        skill_manager = get_new_skill_manager()
+        skill_manager = get_skill_manager()
         
         logger.info(f"Executing skill: {request.skill_name} with params: {request.parameters}")
         
@@ -206,7 +206,7 @@ async def auto_execute_skill(question: str):
     """
     try:
         from app.skills import get_skill_manager
-        skill_manager = get_new_skill_manager()
+        skill_manager = get_skill_manager()
         
         should_use, skill_name, params = skill_manager.should_use_skill(question)
         

@@ -55,6 +55,31 @@
           </div>
         </div>
 
+        <!-- DeepSeek -->
+        <div
+          @click="selectProvider('deepseek')"
+          class="p-4 md:p-8 rounded-xl md:rounded-2xl cursor-pointer transition-all border-2"
+          :class="cfg.provider === 'deepseek'
+            ? 'border-primary bg-primary/5 shadow-lg'
+            : 'border-outline-variant/20 bg-surface hover:border-outline-variant hover:bg-surface-container'"
+        >
+          <div class="flex items-start justify-between">
+            <div class="space-y-3 md:space-y-4">
+              <div class="w-12 h-12 md:w-16 md:h-16 bg-surface-container rounded-lg flex items-center justify-center">
+                <span class="material-symbols-outlined text-3xl md:text-4xl" :class="cfg.provider === 'deepseek' ? 'text-primary' : 'text-outline'">neurology</span>
+              </div>
+              <div>
+                <h3 class="text-xl md:text-2xl font-black text-on-surface">DeepSeek 云端</h3>
+                <p class="text-sm md:text-lg text-on-surface-variant mt-2">Advanced reasoning with DeepSeek's latest models. Supports chain-of-thought thinking with reasoning preview.</p>
+              </div>
+            </div>
+            <div class="w-5 h-5 md:w-6 md:h-6 rounded-full border-2 flex items-center justify-center"
+              :class="cfg.provider === 'deepseek' ? 'border-primary bg-primary' : 'border-outline'">
+              <div v-if="cfg.provider === 'deepseek'" class="w-2 h-2 md:w-3 md:h-3 bg-white rounded-full"></div>
+            </div>
+          </div>
+        </div>
+
         <!-- Ollama -->
         <div 
           @click="selectProvider('ollama')"
@@ -125,6 +150,38 @@
             <option value="gpt-5-nano">GPT-5-nano</option>
             <option value="gpt-5">GPT-5</option>
           </select>
+        </div>
+
+        <!-- DeepSeek API配置提示 -->
+        <div v-if="cfg.provider === 'deepseek'" class="space-y-3">
+          <div class="bg-info/10 border border-info/20 rounded-xl p-4 space-y-3">
+            <div class="flex items-start gap-3">
+              <span class="material-symbols-outlined text-info">info</span>
+              <div>
+                <h4 class="font-bold text-info">DeepSeek API 配置</h4>
+                <p class="text-sm text-info/80 mt-1">
+                  请在项目根目录的 <code class="bg-surface-container px-1 py-0.5 rounded">.env</code> 文件中设置以下环境变量：
+                </p>
+                <div class="mt-3 p-3 bg-surface-container rounded-lg font-mono text-sm">
+                  <p>DEEPSEEK_API_KEY=sk-your-deepseek-api-key</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DeepSeek 模型选择 -->
+        <div v-if="cfg.provider === 'deepseek'" class="space-y-3">
+          <label class="text-sm font-bold text-on-surface-variant uppercase tracking-wide">模型</label>
+          <select
+            v-model="cfg.deepseek_chat_model"
+            @change="handleModelChange"
+            class="w-full bg-surface-container-high rounded-xl px-4 md:px-6 py-4 md:py-5 text-on-surface font-medium focus:outline-none focus:ring-2 focus:ring-primary/30 text-sm md:text-base"
+          >
+            <option value="deepseek-v4-flash">deepseek-v4-flash</option>
+            <option value="deepseek-v4-pro">deepseek-v4-pro</option>
+          </select>
+          <p class="text-xs text-on-surface-variant mt-1">启用 Thinking 后自动使用 DeepSeek Reasoner 模型获取思考链预览。</p>
         </div>
 
         <!-- Ollama URL -->
@@ -268,8 +325,11 @@ const cfg = ref({
   openai_api_key: '',
   openai_base_url: 'https://api.openai-hk.com/v1',
   openai_chat_model: 'gpt-3.5-turbo',
+  deepseek_base_url: 'https://api.deepseek.com/v1',
+  deepseek_chat_model: 'deepseek-v4-pro',
+  deepseek_reasoner_model: 'deepseek-v4-pro',
   ollama_url: 'http://localhost:11434',
-  ollama_model: 'llama2'
+  ollama_model: 'qwen3:4b-instruct'
 })
 
 const validate = () => {

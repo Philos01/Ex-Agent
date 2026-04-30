@@ -26,6 +26,18 @@ export const useAppStore = defineStore('app', () => {
     sessionHistory.value.find(s => s.id === currentSessionId.value)
   )
 
+  // 只重新加载会话列表（用于更新预览信息），不重新加载消息
+  async function refreshSessionList() {
+    try {
+      const sessions = await sessionService.getSessions()
+      sessionHistory.value = sessions
+      isSessionsLoaded.value = true
+      console.log('[DEBUG] Session list refreshed:', sessions.length)
+    } catch (error) {
+      console.error('[ERROR] Failed to refresh session list:', error)
+    }
+  }
+
   // 从数据库加载会话列表
   async function loadSessionsFromDatabase() {
     try {
@@ -86,7 +98,11 @@ export const useAppStore = defineStore('app', () => {
           role: m.role,
           text: m.content,
           time: formatBeijingTime(m.created_at),
-          sources: m.sources
+          sources: m.sources,
+          thinkingState: null,
+          reasoningText: null,
+          reactSteps: null,
+          components: null
         }
       })
       currentSessionId.value = sessionId
@@ -111,10 +127,10 @@ export const useAppStore = defineStore('app', () => {
         await saveCurrentSessionToDatabase()
       }
       
-      // 添加到会话列表开头
-      sessionHistory.value.unshift(newSession)
+      // 重新加载会话列表，确保列表最新且不会重复
+      await loadSessionsFromDatabase()
       
-      // 创建新会话
+      // 设置新会话为当前会话（loadSessionsFromDatabase可能已经设置，这里确保）
       currentSessionId.value = newSession.id
       chatMessages.value = []
       

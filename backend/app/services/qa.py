@@ -11,7 +11,7 @@ from openai import OpenAI
 import requests
 import re
 import json
-from typing import Tuple, List
+from typing import Dict, Any, Tuple, List
 try:
     from ollama import chat
     OLLAMA_SDK_AVAILABLE = True
@@ -19,6 +19,26 @@ except ImportError:
     OLLAMA_SDK_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+def _format_conversation_history(messages: list) -> str:
+    if not messages:
+        return ""
+    result = "### 💬 对话历史：\n"
+    for msg in messages:
+        role = msg.get("role", "user")
+        content = msg.get("content", "")
+        if role == "user":
+            result += f"用户: {content}\n"
+        elif role == "assistant":
+            result += f"助手: {content}\n"
+        skill_result = msg.get("skill_result")
+        if skill_result:
+            skill_name = msg.get("skill_name")
+            prefix = f"[技能结果 - {skill_name}]" if skill_name else "[技能结果]"
+            result += f"{prefix} {skill_result}\n"
+    result += "\n"
+    return result
 
 
 def _build_knowledge_base_overview() -> str:
@@ -176,24 +196,43 @@ def regularize_output(text: str) -> str:
     return text
 
 
-def _get_openai_client(cfg):
-    """获取OpenAI客户端实例"""
-    key = cfg.get("openai_api_key")
-    base_url = cfg.get("openai_base_url")
-    
+def _get_client_for_provider(cfg: dict, provider: str, enable_thinking: bool = False):
+    """
+    Returns (client, model_name) for the given provider.
+    DeepSeek uses the OpenAI SDK with deepseek base_url.
+    Ollama returns (None, model_name) — caller must handle separately.
+    """
+    if provider == "ollama":
+        return None, cfg.get("ollama_model", "")
+
+    if provider == "deepseek":
+        api_key = cfg.get("deepseek_api_key")
+        base_url = cfg.get("deepseek_base_url", "https://api.deepseek.com/v1")
+        model = (cfg.get("deepseek_reasoner_model", "deepseek-reasoner")
+                 if enable_thinking
+                 else cfg.get("deepseek_chat_model", "deepseek-chat"))
+    else:
+        api_key = cfg.get("openai_api_key")
+        base_url = cfg.get("openai_base_url")
+        model = cfg.get("openai_chat_model", "gpt-3.5-turbo")
+
     client_kwargs = {}
-    if key:
-        client_kwargs["api_key"] = key
+    if api_key:
+        client_kwargs["api_key"] = api_key
     if base_url:
         client_kwargs["base_url"] = base_url
-    
-    safe_kwargs = {k: ("***REDACTED***" if k == "api_key" else v) for k, v in client_kwargs.items()}
-    logger.debug("OpenAI Client config: %s", safe_kwargs)
     client_kwargs["timeout"] = 60.0
-    return OpenAI(**client_kwargs)
+    return OpenAI(**client_kwargs), model
+
+
+def _get_openai_client(cfg):
+    """获取OpenAI客户端实例（兼容旧调用）"""
+    client, _ = _get_client_for_provider(cfg, cfg.get("provider", "openai"))
+    return client
 
 
 def answer_question(question: str, provider: str = "openai", top_k: int = 5, session_id: str = "default") -> Tuple[str, List[dict]]:
+    logger.info("=== answer_question start ===")
     cfg = get_complete_config()
     
     # 获取当前时间（北京时间）
@@ -208,20 +247,8 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
     
     # 获取过滤后的历史上下文
     history_messages = _get_filtered_history(session_id)
-    
-    # 构建包含对话历史的消息列表
-    conversation_history = ""
-    if history_messages and len(history_messages) > 0:
-        conversation_history = "### 💬 对话历史：\n"
-        for msg in history_messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "user":
-                conversation_history += f"用户: {content}\n"
-            elif role == "assistant":
-                conversation_history += f"助手: {content}\n"
-        conversation_history += "\n"
-    
+
+    conversation_history = _format_conversation_history(history_messages)
     context = "\n\n".join([d.get("text", "") for d in docs])
     
     kb_overview = _build_knowledge_base_overview()
@@ -273,12 +300,12 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
             r.raise_for_status()
             text = r.json().get("response", "")
         except Exception as e:
-            print(f"[ERROR] Ollama call failed: {str(e)}")
+            logger.error("Ollama call failed: %s", e)
             text = f"无法连接 Ollama 服务，请检查配置。错误: {str(e)}"
     else:
         try:
             client = _get_openai_client(cfg)
-            print(f"[DEBUG] Calling OpenAI with model: {cfg.get('openai_chat_model', 'gpt-3.5-turbo')}")
+            logger.debug("Calling OpenAI with model: %s", cfg.get('openai_chat_model', 'gpt-3.5-turbo'))
             
             completion = client.chat.completions.create(
                 model=cfg.get("openai_chat_model", "gpt-3.5-turbo"),
@@ -300,84 +327,79 @@ def answer_question(question: str, provider: str = "openai", top_k: int = 5, ses
             else:
                 text = "API返回格式错误，请检查配置。"
         except Exception as e:
-            print(f"[ERROR] OpenAI call failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error("OpenAI call failed: %s", e)
+            logger.exception("OpenAI call traceback")
             text = f"LLM 调用失败，请检查配置与网络。错误: {str(e)}"
 
     sources = [d.get("metadata", {}) for d in docs]
     return text, sources
 
 
-def _stream_answer_react(question: str, provider: str = "openai", messages: List[dict] = None):
+def _stream_answer_react(question: str, provider: str = "openai", messages: List[dict] = None, max_tokens: int = None, enable_thinking: bool = False):
     """
-    ReAct模式的流式回答
-    
+    ReAct模式的流式回答（v3.0 AgentLoop适配）
+
     Args:
         question: 当前用户问题
         provider: LLM供应商
         messages: 对话历史
-    
+        max_tokens: 最大输出token数
+        enable_thinking: 是否启用思考模式
+
     Yields:
         ReAct事件
     """
-    from app.agents import ReActAgent
-    
-    print(f"[DEBUG _stream_answer_react] Starting for question: {question[:50]}...")
-    
-    # 构建对话历史字符串
-    conversation_history = ""
-    if messages and len(messages) > 0:
-        conversation_history = "### 💬 对话历史：\n"
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            if role == "user":
-                conversation_history += f"用户: {content}\n"
-            elif role == "assistant":
-                conversation_history += f"助手: {content}\n"
-        conversation_history += "\n"
-    
-    # 初始化ReActAgent
-    agent = ReActAgent(provider=provider)
-    
-    # 流式执行并转换事件类型
+    from app.agents import AgentLoop
+
+    logger.debug("[_stream_answer_react] Starting: question=%s, provider=%s, thinking=%s",
+                 question[:50], provider, enable_thinking)
+
+    conversation_history = _format_conversation_history(messages)
+
+    docs = _retrieve_documents(question, provider, top_k=5)
+    retrieved_context = "\n\n".join([d.get("text", "") for d in docs])
+    logger.debug("[_stream_answer_react] Retrieved context length: %s", len(retrieved_context))
+
+    agent = AgentLoop(provider=provider, max_tokens=max_tokens or 4096, enable_thinking=enable_thinking)
+
     event_count = 0
-    for event in agent.stream_run(question, conversation_history=conversation_history):
+    for event_dict in agent.stream_run(question, conversation_history=conversation_history, retrieved_context=retrieved_context):
         event_count += 1
-        event_type = event.get("type")
-        print(f"[DEBUG _stream_answer_react] Event {event_count}: type={event_type}")
-        
-        # 转换事件类型以匹配前端期望
+        event_type = event_dict.get("type")
+
         if event_type == "thought":
-            yield {"type": "react_thought", "content": event.get("content")}
+            yield {"type": "react_thought", "content": event_dict.get("content")}
+        elif event_type == "thought_chunk":
+            yield {"type": "react_thought_chunk", "content": event_dict.get("content")}
+        elif event_type == "reasoning_chunk":
+            yield {"type": "react_reasoning_chunk", "content": event_dict.get("content")}
         elif event_type == "action":
-            action_name = event.get("name")
-            action_input = event.get("input")
-            print(f"[DEBUG _stream_answer_react] Action event: name={action_name}, input_type={type(action_input)}, input={action_input}")
+            action_data = event_dict.get("content", {})
+            action_name = action_data.get("name") if isinstance(action_data, dict) else event_dict.get("name")
+            action_input = action_data.get("input") if isinstance(action_data, dict) else event_dict.get("input")
+            logger.debug("[_stream_answer_react] Action: %s, input: %s", action_name, action_input)
             yield {"type": "react_action", "name": action_name, "input": action_input}
         elif event_type == "observation":
-            yield {"type": "react_observation", "content": event.get("content")}
+            yield {"type": "react_observation", "content": event_dict.get("content")}
         elif event_type == "final_answer":
-            final_content = event.get("content")
-            print(f"[DEBUG _stream_answer_react] Final answer content (length: {len(str(final_content))}): {str(final_content)[:100]}...")
+            final_content = event_dict.get("content")
+            logger.debug("[_stream_answer_react] Final answer length: %s", len(str(final_content)))
             yield {"type": "react_final_answer", "content": final_content}
-            # 同时发送content事件，确保消息文本被更新
-            print(f"[DEBUG _stream_answer_react] Yielding content event")
-            yield final_content
         elif event_type == "done":
-            yield {"type": "react_steps", "steps": event.get("steps")}
-            # 发送state事件表示完成
+            steps = event_dict.get("metadata", {}).get("steps", event_dict.get("steps", []))
+            yield {"type": "react_steps", "steps": steps}
             yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
         elif event_type == "error":
-            yield {"type": "react_error", "message": event.get("message")}
+            error_msg = event_dict.get("content") or event_dict.get("message")
+            yield {"type": "react_error", "message": error_msg}
         elif event_type == "thinking":
-            # 处理thinking事件，发送state更新
-            iteration = event.get("iteration", 1)
-            total = event.get("total", 5)
+            iteration = event_dict.get("iteration", 1)
+            total = event_dict.get("total", 5)
             yield {"type": "state", "phase": "generating", "message": f"思考中 (第{iteration}/{total}步)", "progress": int(iteration / total * 75)}
-    
-    print(f"[DEBUG _stream_answer_react] Done, total {event_count} events processed")
+        elif event_type == "token_usage":
+            pass
+
+    logger.debug("[_stream_answer_react] Done, %d events processed", event_count)
 
 
 def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None, 
@@ -405,8 +427,9 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     """
     # 检查是否使用ReAct模式
     if use_react:
-        print(f"[QA DEBUG] Using ReAct mode for question: {question[:50]}...")
-        yield from _stream_answer_react(question, provider=provider, messages=messages)
+        logger.info("[QA] ReAct mode for: %s...", question[:50])
+        et_react = enable_thinking if enable_thinking is not None else cfg.get("enable_thinking", False)
+        yield from _stream_answer_react(question, provider=provider, messages=messages, max_tokens=max_tokens, enable_thinking=et_react)
         return
     cfg = get_complete_config()
     
@@ -418,17 +441,15 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         skill_manager = get_skill_manager()
         should_use_skill_flag, resolved_skill_name, resolved_skill_params = skill_manager.should_use_skill(question, provider=provider)
     
-    print(f"[QA DEBUG] Question: {question}")
-    print(f"[QA DEBUG] Use skill: {should_use_skill_flag}")
-    print(f"[QA DEBUG] Skill name: {resolved_skill_name}")
-    print(f"[QA DEBUG] Skill params: {resolved_skill_params}")
+    logger.debug("[QA] question=%s, use_skill=%s, skill=%s, params=%s",
+                 question[:50], should_use_skill_flag, resolved_skill_name, resolved_skill_params)
     
     skill_result_text = ""
     docs = []
     sources = []
     
     if should_use_skill_flag and resolved_skill_name and resolved_skill_params:
-        print(f"[QA DEBUG] Using skill mode - skipping RAG retrieval")
+        logger.info("[QA] Skill mode: %s, skipping RAG retrieval", resolved_skill_name)
         if include_state:
             yield {"type": "state", "phase": "skill_call", "message": f"正在调用 {resolved_skill_name} 技能...", "progress": 10}
         
@@ -436,8 +457,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         skill_result = skill_mgr.execute_skill(resolved_skill_name, **resolved_skill_params)
         
         if not skill_result.get("success", False):
-            logger.warning(f"技能 {resolved_skill_name} 执行失败，降级到 RAG 检索")
-            print(f"[QA DEBUG] Skill failed, falling back to RAG retrieval")
+            logger.warning("技能 %s 执行失败，降级到 RAG 检索", resolved_skill_name)
             should_use_skill_flag = False
             resolved_skill_name = None
             docs = _retrieve_documents(question, provider, top_k)
@@ -450,10 +470,10 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             if include_state:
                 yield {"type": "state", "phase": "skill_call", "message": f"{resolved_skill_name} 技能执行完成", "progress": 40}
             context = f"## 技能执行结果\n{skill_result_text}"
-            print(f"[QA DEBUG] Context (skill mode): {context}...")
+            logger.debug("[QA] Skill context length: %d", len(context))
     else:
         # 不使用技能，进行正常的 RAG 检索
-        print(f"[QA DEBUG] Using RAG mode")
+        logger.info("[QA] RAG mode")
         summary_config = cfg.get("summary_search", {})
         use_two_layer = summary_config.get("enabled", False)
         hybrid_config = cfg.get("hybrid_search", {})
@@ -473,31 +493,9 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             yield {"type": "state", "phase": "retrieving", "message": f"检索到 {len(docs)} 篇高度相关的文献", "progress": 25}
         
         context = "\n\n".join([d.get("text", "") for d in docs])
-        print(f"[QA DEBUG] Context (RAG mode): {context[:200]}...")
+        logger.debug("[QA] RAG context length: %d", len(context))
     
-    # 构建包含对话历史的消息列表
-    conversation_history = ""
-    if messages and len(messages) > 0:
-        conversation_history = "### 💬 对话历史：\n"
-        for msg in messages:
-            role = msg.get("role", "user")
-            content = msg.get("content", "")
-            # 检查是否包含技能结果标记
-            skill_result_tag = msg.get("skill_result", None)
-            skill_name_tag = msg.get("skill_name", None)
-            
-            if role == "user":
-                conversation_history += f"用户: {content}\n"
-            elif role == "assistant":
-                conversation_history += f"助手: {content}\n"
-            
-            # 如果有技能结果，添加到对话历史
-            if skill_result_tag:
-                if skill_name_tag:
-                    conversation_history += f"[技能结果 - {skill_name_tag}] {skill_result_tag}\n"
-                else:
-                    conversation_history += f"[技能结果] {skill_result_tag}\n"
-        conversation_history += "\n"
+    conversation_history = _format_conversation_history(messages)
     
     # 如果当前轮次使用了技能，将技能结果添加到上下文
     current_skill_context = ""
@@ -679,12 +677,8 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
     et = enable_thinking if enable_thinking is not None else cfg.get("enable_thinking", False)
     
     # 调试日志
-    print(f"[DEBUG] stream_answer using parameters:")
-    print(f"[DEBUG]   temperature: {temp}")
-    print(f"[DEBUG]   top_p: {tp}")
-    print(f"[DEBUG]   max_tokens: {mt}")
-    print(f"[DEBUG]   presence_penalty: {pp}")
-    print(f"[DEBUG]   frequency_penalty: {fp}")
+    logger.debug("stream_answer params: temp=%s, top_p=%s, max_tokens=%s, pp=%s, fp=%s",
+                 temp, tp, mt, pp, fp)
     
     # 流式输出处理函数
     def process_stream_chunk(chunk):
@@ -711,9 +705,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         # Ollama流式响应 - 使用官方SDK或回退到HTTP请求
         try:
             if OLLAMA_SDK_AVAILABLE:
-                # 使用ollama Python SDK
-                print(f"[DEBUG] Using Ollama SDK with model: {cfg.get('ollama_model')}")
-                print(f"[DEBUG] enable_thinking: {et}")
+                logger.debug("Using Ollama SDK, model: %s, thinking: %s", cfg.get('ollama_model'), et)
                 stream = chat(
                     model=cfg.get('ollama_model'),
                     messages=[{'role': 'user', 'content': prompt}],
@@ -753,8 +745,7 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                         processed_chunk = process_stream_chunk(content)
                         yield processed_chunk
             else:
-                # 回退到直接HTTP请求
-                print(f"[DEBUG] Ollama SDK not available, falling back to HTTP request")
+                logger.debug("Ollama SDK not available, falling back to HTTP request")
                 endpoint = cfg.get("ollama_url").rstrip("/") + "/api/generate"
                 ollama_options = {
                     "temperature": temp,
@@ -796,115 +787,105 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
                             if data.get("done", False):
                                 break
                         except Exception as e:
-                            print(f"[DEBUG] Failed to parse JSON: {e}")
+                            logger.debug("Failed to parse JSON: %s", e)
                             pass
             # Ollama 流式结束，发送 done 状态
             if include_state:
                 yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
         except Exception as e:
-            print(f"[ERROR] Ollama stream failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Ollama stream failed: %s", e)
+            logger.exception("Ollama stream traceback")
             if include_state:
                 yield {"type": "state", "phase": "done", "message": "生成出错", "progress": 100}
             yield f"无法连接 Ollama 服务，请检查配置。错误: {str(e)}"
     else:
-        # OpenAI流式响应
+        # OpenAI / DeepSeek 流式响应
         try:
-            client = _get_openai_client(cfg)
-            model_name = cfg.get("openai_chat_model", "gpt-3.5-turbo")
-            print(f"[DEBUG] Calling OpenAI stream with:")
-            print(f"[DEBUG]   model: {model_name}")
-            print(f"[DEBUG]   max_tokens: {mt}")
-            print(f"[DEBUG]   temperature: {temp}")
-            print(f"[DEBUG]   top_p: {tp}")
-            print(f"[DEBUG]   presence_penalty: {pp}")
-            print(f"[DEBUG]   frequency_penalty: {fp}")
-            
-            stream = client.chat.completions.create(
+            client, model_name = _get_client_for_provider(cfg, provider, enable_thinking=et)
+            logger.debug("Stream: provider=%s, model=%s", provider, model_name)
+
+            api_kwargs: Dict[str, Any] = dict(
                 model=model_name,
                 messages=[{"role": "user", "content": prompt}],
                 max_tokens=mt,
-                temperature=temp,
-                top_p=tp,
+                stream=True,
                 presence_penalty=pp,
                 frequency_penalty=fp,
-                stream=True,
             )
-            
+            # deepseek-reasoner does not support temperature/top_p
+            if not (provider == "deepseek" and et):
+                api_kwargs["temperature"] = temp
+                api_kwargs["top_p"] = tp
+
+            stream = client.chat.completions.create(**api_kwargs)
+
             for chunk in stream:
-                # 安全地检查choices数组和delta
-                if (
-                    chunk.choices 
-                    and len(chunk.choices) > 0 
-                    and chunk.choices[0].delta 
-                    and chunk.choices[0].delta.content
-                ):
-                    content = chunk.choices[0].delta.content
-                    processed_chunk = process_stream_chunk(content)
-                    yield processed_chunk
-            # OpenAI 流式结束，发送 done 状态
+                if chunk.choices and len(chunk.choices) > 0 and chunk.choices[0].delta:
+                    delta = chunk.choices[0].delta
+                    reasoning = getattr(delta, 'reasoning_content', None)
+                    if reasoning:
+                        yield {"type": "reasoning_chunk", "content": reasoning}
+                    if delta.content:
+                        content = delta.content
+                        processed_chunk = process_stream_chunk(content)
+                        yield processed_chunk
             if include_state:
                 yield {"type": "state", "phase": "done", "message": "生成完毕", "progress": 100}
         except Exception as e:
-            print(f"[ERROR] OpenAI stream failed: {str(e)}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Stream failed (provider=%s): %s", provider, e)
+            logger.exception("Stream traceback")
             if include_state:
                 yield {"type": "state", "phase": "done", "message": "生成出错", "progress": 100}
             yield f"LLM 调用失败，请检查配置与网络。错误: {str(e)}"
 
 
 def _retrieve_documents(question: str, provider: str = "openai", top_k: int = 5):
-    """
-    检索文档，根据配置选择适当的检索方式
-    
-    Args:
-        question: 用户问题
-        provider: LLM提供商
-        top_k: 检索数量
-        
-    Returns:
-        检索到的文档列表
-    """
     cfg = get_complete_config()
-    
-    print(f"[DEBUG _retrieve_documents] 开始检索，问题: {question[:50]}...")
-    
-    # 检查是否启用双层检索
+
+    logger.debug("[_retrieve_documents] Starting for: %s...", question[:50])
+
+    pdr_config = cfg.get("parent_document_retrieval", {})
+    use_parent_retrieval = pdr_config.get("enabled", False)
+
+    if use_parent_retrieval:
+        try:
+            from app.services.parent_retriever import get_parent_retriever
+            retriever = get_parent_retriever()
+            results = retriever.retrieve(question)
+
+            if results:
+                logger.info("Parent document retrieval returned %d results", len(results))
+                return results
+            else:
+                logger.info("Parent document retrieval returned no results, falling back to hybrid")
+        except Exception as e:
+            logger.error("Parent document retrieval failed: %s", e, exc_info=True)
+
     summary_config = cfg.get("summary_search", {})
     use_two_layer = summary_config.get("enabled", False)
-    
-    print(f"[DEBUG _retrieve_documents] 双层检索配置: enabled={use_two_layer}")
-    
+
     if use_two_layer:
         try:
-            print(f"[DEBUG _retrieve_documents] 尝试使用双层检索...")
             from app.services.two_layer_search import two_layer_search
-            logger.info("使用双层检索")
+            logger.info("Using two-layer search")
             result = two_layer_search(question, provider=provider)
-            print(f"[DEBUG _retrieve_documents] 双层检索返回 {len(result)} 个结果")
+            logger.info("Two-layer search returned %d results", len(result))
             return result
         except Exception as e:
-            logger.error(f"双层检索失败，回退到混合检索: {e}")
-            import traceback
-            logger.error(traceback.format_exc())
-            print(f"[DEBUG _retrieve_documents] 双层检索异常: {e}")
-    
-    # 检查是否启用混合检索
+            logger.error("Two-layer search failed: %s", e, exc_info=True)
+
     hybrid_config = cfg.get("hybrid_search", {})
     use_hybrid = hybrid_config.get("enabled", True)
-    
+
     if use_hybrid:
         try:
             from app.services.hybrid_search import hybrid_search
-            logger.info("使用混合检索")
+            logger.info("Using hybrid search")
             return hybrid_search(question, provider=provider)
         except Exception as e:
-            logger.error(f"混合检索失败，回退到向量检索: {e}")
-    
-    # 默认使用向量检索
-    logger.info("使用向量检索")
+            logger.error("Hybrid search failed, falling back to vector: %s", e)
+
+    logger.info("Using vector search")
     return search(question, top_k=top_k, provider=provider)
 
 
@@ -937,13 +918,11 @@ def _get_filtered_history(session_id: str = "default") -> List[dict]:
             exclude_questionable=exclude_questionable
         )
         
-        logger.debug(f"获取到 {len(filtered_history)} 条过滤后的历史消息")
+        logger.debug("Fetched %d filtered history messages", len(filtered_history))
         return filtered_history
-        
+
     except Exception as e:
-        logger.error(f"获取过滤历史失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to get filtered history: %s", e, exc_info=True)
         return []
 
 
@@ -973,8 +952,6 @@ def _add_to_history(
         context_mgr = get_context_manager(session_id, max_history=max_history)
         context_mgr.add_message(role, content)
         
-        logger.debug(f"已添加 {role} 消息到历史")
+        logger.debug("Added %s message to history", role)
     except Exception as e:
-        logger.error(f"添加到历史失败: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to add to history: %s", e, exc_info=True)

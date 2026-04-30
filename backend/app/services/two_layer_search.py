@@ -44,35 +44,32 @@ class TwoLayerRetriever:
         Returns:
             检索结果列表
         """
-        print(f"[DEBUG TwoLayerRetriever.search] 双层检索已被调用，查询: '{query[:50]}...'")
+        logger.debug("[TwoLayerRetriever.search] Called, query: '%s...'", query[:50])
         
         # 检查原始查询是否为空
         if not query or not query.strip():
-            logger.error("原始查询为空，无法执行检索")
-            print(f"[DEBUG TwoLayerRetriever.search] 错误：查询为空")
+            logger.error("Query is empty")
             return []
         
-        logger.info(f"开始双层检索: query='{query}'")
-        print(f"[DEBUG TwoLayerRetriever.search] 开始双层检索，原始查询: '{query}'")
+        logger.info("Two-layer search: query='%s'", query)
         
         # 1. 查询改写 - 在摘要检索前优化查询
-        logger.info(f"[DEBUG] 开始查询改写，原始查询: '{query}', provider: {provider}")
-        print(f"[DEBUG TwoLayerRetriever.search] 开始查询改写...")
+        logger.debug("Rewriting query...")
         query_rewrite_service = get_query_rewrite_service()
         rewritten_query = query_rewrite_service.rewrite_query(query, provider=provider, use_summary_config=True)
         
         # 二次验证改写后的查询，如果为空则使用原始查询
         if not rewritten_query or not rewritten_query.strip():
-            logger.warning("改写后的查询为空，使用原始查询")
+            logger.warning("Rewritten query is empty, using original")
             rewritten_query = query
         
         # 第一层：检索摘要，找到相关文件（使用改写后的查询）
         summary_results = self._search_summaries(rewritten_query, provider)
         
-        logger.debug(f"摘要检索结果: {summary_results}")
+        logger.debug("Summary search results: %s", summary_results)
         
         if not summary_results:
-            logger.info("摘要检索无结果，直接检索完整内容")
+            logger.info("No summary results, searching full content directly")
             return self._search_full_content(rewritten_query, provider, use_hybrid)
         
         # 获取所有摘要检索到的文件名
@@ -83,10 +80,10 @@ class TwoLayerRetriever:
             if filename and filename not in relevant_filenames:
                 relevant_filenames.append(filename)
         
-        logger.info(f"摘要检索到 {len(relevant_filenames)} 个相关文件: {relevant_filenames}")
+        logger.info("Summary found %d relevant files: %s", len(relevant_filenames), relevant_filenames)
         
         # 第二层：在这些相关文件中检索正文内容（使用改写后的查询）
-        logger.info("正在检索相关文件的正文内容...")
+        logger.debug("Searching full content in relevant files...")
         try:
             from app.services.vector_store import search_by_filenames
             content_results = search_by_filenames(
@@ -97,14 +94,14 @@ class TwoLayerRetriever:
             )
             
             if content_results:
-                logger.info(f"从相关文件中检索到 {len(content_results)} 个正文片段")
+                logger.info("Content search found %d results in relevant files", len(content_results))
                 return content_results
             else:
-                logger.info("相关文件中未找到正文内容，回退到全局检索")
+                logger.info("No content found in relevant files, falling back to global search")
                 return self._search_full_content(rewritten_query, provider, use_hybrid)
                 
         except Exception as e:
-            logger.error(f"检索相关文件正文失败，回退到全局检索: {e}")
+            logger.error("Content search in relevant files failed, fallback to global: %s", e)
             return self._search_full_content(rewritten_query, provider, use_hybrid)
     
     def _search_summaries(self, query: str, provider: str = "openai") -> List[Dict[str, Any]]:
@@ -118,18 +115,17 @@ class TwoLayerRetriever:
         Returns:
             摘要检索结果，包含相关性分数
         """
-        print(f"[DEBUG TwoLayerRetriever._search_summaries] 开始检索摘要，查询: '{query[:50]}...'")
+        logger.debug("[_search_summaries] Starting, query: '%s...'", query[:50])
         store = get_summary_store()
         all_summaries = store.get_all_summaries()
 
-        print(f"[DEBUG TwoLayerRetriever._search_summaries] 获取到 {len(all_summaries)} 个摘要")
+        logger.debug("[_search_summaries] Got %d summaries", len(all_summaries))
 
         if not all_summaries:
-            logger.info("没有可用的文档摘要")
-            print(f"[DEBUG TwoLayerRetriever._search_summaries] 没有可用的文档摘要")
+            logger.info("No summaries available")
             return []
 
-        logger.info(f"共有 {len(all_summaries)} 个文档摘要待检索")
+        logger.debug("Total %d summaries to search", len(all_summaries))
 
         try:
             current_hash = hash(tuple(s.filename for s in all_summaries))
@@ -168,7 +164,7 @@ class TwoLayerRetriever:
 
             results = self._summary_bm25.search(query, top_k=self.summary_top_k)
 
-            logger.debug(f"BM2.5 原始搜索结果: {results}")
+            logger.debug("BM25 raw results: %s", results)
 
             filtered_results = []
             for result in results:
@@ -178,15 +174,13 @@ class TwoLayerRetriever:
                     filtered_results.append(result)
 
             if len(filtered_results) < len(results):
-                logger.info(f"摘要检索: {len(results)} 个结果中 {len(filtered_results)} 个通过相关性阈值 ({self.relevance_threshold})")
+                logger.info("Summary search: %d/%d passed relevance threshold (%.2f)", len(filtered_results), len(results), self.relevance_threshold)
 
-            logger.info(f"摘要检索完成，返回 {len(filtered_results)} 个结果")
+            logger.info("Summary search completed, returning %d results", len(filtered_results))
             return filtered_results
 
         except Exception as e:
-            logger.error(f"摘要检索失败: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Summary search failed: %s", e, exc_info=True)
             return []
     
     def _search_full_content(

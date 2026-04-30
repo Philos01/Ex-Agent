@@ -64,9 +64,7 @@ class SummaryStore:
             logger.info(f"摘要保存成功: {summary.filename}")
             return True
         except Exception as e:
-            logger.error(f"保存摘要失败: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Summary save failed: %s", e, exc_info=True)
             return False
     
     def get_summary(self, filename: str) -> Optional[DocumentSummary]:

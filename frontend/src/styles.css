@@ -70,7 +70,7 @@ input[type="range"]::-webkit-slider-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #006b5f;
+  background: #4f46e5;
   cursor: pointer;
 }
 
@@ -78,7 +78,7 @@ input[type="range"]::-moz-range-thumb {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #006b5f;
+  background: #4f46e5;
   cursor: pointer;
   border: none;
 }

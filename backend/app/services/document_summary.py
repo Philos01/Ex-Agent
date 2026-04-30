@@ -174,9 +174,7 @@ class DocumentSummarizer:
             return doc_summary
             
         except Exception as e:
-            logger.error(f"生成文档摘要失败: {e}")
-            import traceback
-            traceback.print_exc()
+            logger.error("Summary generation failed: %s", e, exc_info=True)
             # 返回一个简单的摘要
             doc_summary = DocumentSummary()
             doc_summary.filename = filename

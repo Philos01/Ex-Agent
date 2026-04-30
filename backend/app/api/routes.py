@@ -73,7 +73,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
             if file_ext in [".pdf", ".docx", ".doc", ".xlsx", ".xls"]:
                 # 对于 PDF 文件，如果转换功能未启用，则直接上传
                 if file_ext == ".pdf" and not cfg.get("allow_pdf_conversion", False):
-                    logger.debug("PDF 转换功能未启用，直接上传 PDF 文件: %s", f.filename)
+                    logger.debug("PDF conversion disabled, uploading raw PDF: %s", f.filename)
                     dest = await save_upload(f)
                     processed_filename = os.path.basename(dest)
                     final_file_path = dest
@@ -137,10 +137,16 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 if not os.path.exists(python_exe):
                     python_exe = sys.executable
                 
+                # 根据文件类型选择超时
+                if file_ext == ".pdf":
+                    timeout_sec = cfg.get("timeouts", {}).get("pdf_conversion_subprocess", 1800)
+                else:
+                    timeout_sec = cfg.get("timeouts", {}).get("docx2markdown_subprocess", 300)
+
                 # 运行转换脚本（输出直接显示在终端，便于调试）
                 result = subprocess.run(
                     [python_exe, script_path, temp_path, temp_output_dir],
-                    timeout=cfg.get("timeouts", {}).get("docx2markdown_subprocess", 300)
+                    timeout=timeout_sec
                 )
                 
                 logger.debug("转换完成，返回码: %s", result.returncode)
@@ -253,10 +259,8 @@ async def upload_files(files: List[UploadFile] = File(...)):
                 })
                 logger.debug("文件 %s 处理成功", f.filename)
         except Exception as e:
-            logger.error("文件 %s 处理失败: %s", f.filename, e)
-            import traceback
-            traceback.print_exc()
-            
+            logger.error("文件 %s 处理失败: %s", f.filename, e, exc_info=True)
+
             # 完整回滚
             try:
                 # 1. 从向量库删除已添加的文档
@@ -264,18 +268,18 @@ async def upload_files(files: List[UploadFile] = File(...)):
                     try:
                         from app.services.vector_store import delete_documents_by_filename
                         deleted_count = delete_documents_by_filename(processed_filename)
-                        logger.debug("已回滚，从向量库删除 %d 个文档", deleted_count)
+                        logger.debug("Rollback: deleted %d docs from vector store", deleted_count)
                     except Exception as rollback_error:
-                        logger.error("回滚向量库失败: %s", rollback_error)
+                        logger.error("Rollback vector store failed: %s", rollback_error)
                 
                 # 2. 删除对应的摘要
                 if processed_filename:
                     try:
                         from app.services.summary_store import delete_document_summary
                         delete_document_summary(processed_filename)
-                        logger.debug("已删除文档摘要: %s", processed_filename)
+                        logger.debug("Rollback: deleted summary for %s", processed_filename)
                     except Exception as rollback_error:
-                        logger.error("删除摘要失败: %s", rollback_error)
+                        logger.error("Rollback summary delete failed: %s", rollback_error)
                 
                 # 3. 从 metadata 中删除
                 if added_to_metadata and processed_filename:
@@ -288,18 +292,18 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         # 过滤掉该文件的记录
                         metas = [m for m in metas if m.get("filename") != processed_filename]
                         METADATA_PATH.write_text(json.dumps(metas, ensure_ascii=False, indent=2), encoding="utf-8")
-                        logger.debug("已从 metadata 删除: %s", processed_filename)
+                        logger.debug("Rollback: removed %s from metadata", processed_filename)
                     except Exception as rollback_error:
-                        logger.error("回滚 metadata 失败: %s", rollback_error)
+                        logger.error("Rollback metadata failed: %s", rollback_error)
                 
                 # 4. 删除文件
                 if final_file_path and os.path.exists(final_file_path):
                     try:
                         delete_uploaded_file(processed_filename)
                         os.remove(final_file_path)
-                        logger.debug("已删除文件: %s", final_file_path)
+                        logger.debug("Rollback: deleted file %s", final_file_path)
                     except Exception as rollback_error:
-                        logger.error("删除文件失败: %s", rollback_error)
+                        logger.error("Rollback file delete failed: %s", rollback_error)
                 
                 # 5. 清理临时文件
                 if temp_path and os.path.exists(temp_path):
@@ -310,9 +314,7 @@ async def upload_files(files: List[UploadFile] = File(...)):
                         pass
                         
             except Exception as full_rollback_error:
-                logger.error("完整回滚过程出错: %s", full_rollback_error)
-                import traceback
-                traceback.print_exc()
+                logger.error("Full rollback failed: %s", full_rollback_error, exc_info=True)
             
             failed.append({
                 "filename": f.filename,
@@ -495,8 +497,10 @@ async def qa_endpoint(req: QARequest):
     
     docs = []
     sources = []
-    
-    if not use_skill:
+
+    # ReAct 模式下，_stream_answer_react 内部会自行检索文档，此处跳过避免重复
+    use_react_mode = req.use_react if req.use_react is not None else False
+    if not use_skill and not use_react_mode:
         from app.services.qa import _retrieve_documents
         docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
         sources = [d.get("metadata", {}) for d in docs]
@@ -557,8 +561,10 @@ async def qa_endpoint(req: QARequest):
             if isinstance(item, dict):
                 # 处理所有 ReAct 相关事件
                 item_type = item.get('type')
-                if item_type in ['state', 'skill_result', 'react_thought', 'react_action', 
-                               'react_observation', 'react_final_answer', 'react_steps', 'react_error']:
+                if item_type in ['state', 'skill_result', 'reasoning_chunk',
+                               'react_thought', 'react_thought_chunk', 'react_reasoning_chunk',
+                               'react_action', 'react_observation', 'react_final_answer',
+                               'react_steps', 'react_error']:
                     yield f"data: {json.dumps(item)}\n\n"
             else:
                 # 这是一个content事件
@@ -697,8 +703,9 @@ def get_document_preview(filename: str, chunk_index: int = None):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"获取文档预览失败: {str(e)}")
+    except Exception as e:
+        logger.error("Document preview failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取文档预览失败: {str(e)}")
 
 
@@ -791,8 +798,9 @@ def regenerate_summary(filename: str, provider: str = None):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=f"重新生成摘要失败: {str(e)}")
+    except Exception as e:
+        logger.error("Regenerate summary failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail=f"重新生成摘要失败: {str(e)}")
 
 
@@ -826,3 +834,68 @@ def clear_context_history(session_id: str = "default"):
         return {"status": "ok", "message": f"会话 {session_id} 的上下文历史已清除"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"清除上下文历史失败: {str(e)}")
+
+
+# === Merged from api/v1/routes.py ===
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    rating: int
+    comment: Optional[str] = None
+
+
+@router.get("/documents/{filename}")
+def get_document_info(filename: str):
+    """获取单个文档信息"""
+    files = list_uploaded_files()
+    for f in files:
+        if f.get("filename") == filename:
+            return f
+    raise HTTPException(status_code=404, detail="Document not found")
+
+
+@router.get("/documents/{filename}/chunks")
+def get_document_chunks(filename: str):
+    """获取文档的所有chunks"""
+    from app.services.vector_store import get_collection
+    collection = get_collection()
+    all_docs = collection.get(include=["documents", "metadatas"])
+    chunks = []
+    for i, (doc, meta) in enumerate(zip(all_docs.get("documents", []), all_docs.get("metadatas", []))):
+        if meta and meta.get("source") == filename:
+            chunks.append({
+                "index": meta.get("chunk_index", i),
+                "text": doc[:500] + "..." if len(doc) > 500 else doc,
+                "full_text": doc,
+                "metadata": meta
+            })
+    chunks.sort(key=lambda x: x.get("index", 0))
+    return {"filename": filename, "chunks": chunks, "total_chunks": len(chunks)}
+
+
+@router.post("/qa/sync")
+def qa_sync_endpoint(req: QARequest):
+    """同步QA端点（非流式）"""
+    cfg = get_complete_config()
+    provider = req.provider if req.provider else cfg.get("provider", "openai")
+    result = answer_question(
+        req.question,
+        provider=provider,
+        top_k=req.top_k,
+        temperature=req.temperature,
+        top_p=req.top_p,
+        max_tokens=req.max_tokens,
+        presence_penalty=req.presence_penalty,
+        frequency_penalty=req.frequency_penalty,
+        enable_thinking=req.enable_thinking,
+        use_react=req.use_react,
+        messages=[{"role": m.role, "content": m.content} for m in req.messages]
+    )
+    return result
+
+
+@router.post("/feedback")
+def submit_feedback(req: FeedbackRequest):
+    """提交用户反馈"""
+    logger.info("Received feedback for message %s: rating=%d, comment=%s", req.message_id, req.rating, req.comment)
+    return {"success": True, "message_id": req.message_id}

@@ -9,7 +9,7 @@ import re
 from collections import defaultdict, Counter
 from typing import List, Dict, Tuple
 import jieba
-from app.services.vector_store import get_client, init_collection
+from app.services.vector_store import get_client, init_collection, reset_collection
 
 logger = logging.getLogger(__name__)
 
@@ -37,33 +37,74 @@ class BM25Retriever:
         self.term_doc_count = defaultdict(int)  # 每个词出现在多少文档中
         self.initialized = False
     
+    def _is_hnsw_error(self, error: Exception) -> bool:
+        """
+        检测错误是否为 HNSW 索引损坏相关错误
+        
+        Args:
+            error: 异常对象
+            
+        Returns:
+            是否为 HNSW 索引损坏错误
+        """
+        error_str = str(error).lower()
+        hnsw_error_keywords = [
+            "hnsw", "compaction", "compactor", "segment reader",
+            "loading index", "backfill", "corrupt", "segment",
+            "error executing plan"
+        ]
+        return any(keyword in error_str for keyword in hnsw_error_keywords)
+    
+    def _try_load_with_recovery(self, max_retries: int = 2) -> bool:
+        """
+        尝试从向量库加载文档到 BM2.5 索引。
+
+        HNSW 索引损坏时不会自动重置（数据保全策略），
+        仅记录错误并返回 False。修复需通过重启服务触发 startup_health_check。
+        """
+        for attempt in range(max_retries + 1):
+            try:
+                collection = init_collection()
+                if not collection:
+                    logger.warning("无法获取向量库集合")
+                    return False
+
+                results = collection.get(include=["documents", "metadatas"])
+                if not results or not results.get("documents"):
+                    logger.warning("向量库中没有文档")
+                    return False
+
+                documents = results.get("documents", [])
+                metadatas = results.get("metadatas", [])
+                ids = results.get("ids", [])
+
+                self._build_index(documents, metadatas, ids)
+                logger.debug("Loaded %d documents from vector store into BM25 index", self.doc_count)
+                return True
+
+            except Exception as e:
+                if self._is_hnsw_error(e):
+                    logger.warning(
+                        f"检测到 HNSW 索引损坏（尝试 {attempt + 1}/{max_retries + 1}），"
+                        f"数据已保全。请重启服务以触发自动修复。错误: {e}"
+                    )
+                    break  # 不重置，保全数据
+                else:
+                    logger.error(f"从向量库加载文档失败: {e}")
+                    break
+
+        return False
+    
     def load_from_vector_store(self) -> bool:
         """
         从 Chroma 向量库加载文档到 BM2.5 索引
+        包含 HNSW 索引损坏自动恢复机制
         
         Returns:
             是否成功加载
         """
         try:
-            collection = init_collection()
-            if not collection:
-                logger.warning("无法获取向量库集合")
-                return False
-            
-            # 获取所有文档 (ids 是默认返回的，不需要在 include 中指定)
-            results = collection.get(include=["documents", "metadatas"])
-            if not results or not results.get("documents"):
-                logger.warning("向量库中没有文档")
-                return False
-            
-            documents = results.get("documents", [])
-            metadatas = results.get("metadatas", [])
-            ids = results.get("ids", [])
-            
-            self._build_index(documents, metadatas, ids)
-            logger.info(f"成功从向量库加载 {self.doc_count} 个文档到 BM2.5 索引")
-            return True
-            
+            return self._try_load_with_recovery(max_retries=2)
         except Exception as e:
             logger.error(f"从向量库加载文档失败: {e}")
             return False
@@ -208,7 +249,7 @@ class BM25Retriever:
                 "id": self.doc_ids[idx] if idx < len(self.doc_ids) else ""
             })
         
-        logger.info(f"BM2.5 检索完成，返回 {len(results)} 个结果")
+        logger.debug("BM25 search returned %d results", len(results))
         return results
 
 

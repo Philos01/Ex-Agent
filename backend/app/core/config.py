@@ -73,13 +73,14 @@ ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "1440
 # OpenAI API Configuration - ONLY from environment variables, NO persistence
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 OPENAI_BASE_URL = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
 
 # API key access tracking
 _api_key_access_count = itertools.count(1)
 _api_key_access_lock = threading.Lock()
 _last_api_key_access: Optional[datetime] = None
 
-DEFAULT_CONFIG: Dict = {
+_DEFAULT_CONFIG: Dict = {
     "provider": "openai",
     "embedding_mode": "local",
     "local_embedding_model": "BAAI/bge-small-zh-v1.5",
@@ -89,6 +90,9 @@ DEFAULT_CONFIG: Dict = {
     "openai_chat_model": "gpt-3.5-turbo",
     "ollama_url": "http://localhost:11434",
     "ollama_model": "",
+    "deepseek_base_url": "https://api.deepseek.com/v1",
+    "deepseek_chat_model": "deepseek-chat",
+    "deepseek_reasoner_model": "deepseek-reasoner",
     "chunk_size": 1500,
     "chunk_overlap": 225,
     "temperature": 0.7,
@@ -133,7 +137,20 @@ DEFAULT_CONFIG: Dict = {
         "skill_executor_python": 60,
         "skill_executor_shell": 60,
         "react_agent_subprocess": 60,
-        "docx2markdown_subprocess": 300
+        "docx2markdown_subprocess": 300,
+        "pdf_conversion_subprocess": 1800
+    },
+    "parent_document_retrieval": {
+        "enabled": False,
+        "parent_max_chars": 8000,
+        "parent_min_chars": 300,
+        "parent_max_count": 5,
+        "child_chunk_size": 300,
+        "child_chunk_overlap": 60,
+        "child_retrieve_count": 20,
+        "parent_max_chars_total": 12000,
+        "enable_distance_scoring": True,
+        "fallback_to_hybrid": True
     },
     "skills": {
         "enabled": True,
@@ -164,11 +181,7 @@ def ensure_data_dirs():
 
 def load_config() -> Dict:
     """
-    Load configuration from root config.json file.
-
-    Configuration is loaded with the following priority:
-    1. Root config.json file (primary source)
-    2. DEFAULT_CONFIG fallback (if config.json doesn't exist or is invalid)
+    Load configuration from root config.json file (the single source of truth).
 
     Sensitive credentials (API keys) are NEVER loaded from config files,
     they are ONLY loaded from environment variables.
@@ -177,16 +190,14 @@ def load_config() -> Dict:
         Dict: Configuration dictionary
     """
     if not CONFIG_PATH.exists():
-        save_config(DEFAULT_CONFIG)
+        save_config(_DEFAULT_CONFIG)
     try:
         cfg = json.loads(CONFIG_PATH.read_text(encoding="utf-8"))
-        # Ensure API key is not loaded from disk
         if "openai_api_key" in cfg:
             del cfg["openai_api_key"]
         return cfg
     except Exception:
-        # Return a copy of DEFAULT_CONFIG without API key
-        cfg = DEFAULT_CONFIG.copy()
+        cfg = _DEFAULT_CONFIG.copy()
         if "openai_api_key" in cfg:
             del cfg["openai_api_key"]
         return cfg
@@ -207,6 +218,8 @@ def save_config(cfg: Dict):
     # Remove sensitive fields before saving
     if "openai_api_key" in safe_cfg:
         del safe_cfg["openai_api_key"]
+    if "deepseek_api_key" in safe_cfg:
+        del safe_cfg["deepseek_api_key"]
     with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(safe_cfg, f, indent=2, ensure_ascii=False)
 
@@ -250,6 +263,8 @@ def get_complete_config() -> Dict:
         cfg["openai_api_key"] = OPENAI_API_KEY
     if OPENAI_BASE_URL:
         cfg["openai_base_url"] = OPENAI_BASE_URL
+    if DEEPSEEK_API_KEY:
+        cfg["deepseek_api_key"] = DEEPSEEK_API_KEY
     return cfg
 
 

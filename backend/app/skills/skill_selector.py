@@ -210,7 +210,7 @@ Skills are ONLY for external API calls or specialized tools.
                 response_text = self._call_ollama(prompt)
             else:
                 response_text = self._call_openai(prompt)
-            print(f"[SkillSelector-By-LLM] Using provider: {provider}")
+            logger.debug("[SkillSelector-By-LLM] Using provider: %s", provider)
             if not response_text:
                 logger.warning("[SkillSelector-By-LLM] Empty LLM response")
                 return False, None, None

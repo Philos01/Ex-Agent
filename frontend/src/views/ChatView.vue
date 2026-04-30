@@ -36,7 +36,7 @@
 
       <!-- 消息列表 -->
       <div v-else class="max-w-full md:max-w-4xl mx-auto space-y-4 md:space-y-8">
-        <div v-for="(m, index) in messages" :key="index" class="flex flex-col">
+        <div v-for="(m, index) in messages" :key="m.id || `msg-${index}`" class="flex flex-col">
           <!-- 用户消息 -->
           <div v-if="m.role === 'user'" class="flex flex-col items-end mb-2 md:mb-4">
             <div class="flex items-center gap-2 mb-1 md:mb-2 pr-1 md:pr-2">
@@ -44,9 +44,16 @@
               <span class="text-xs text-outline">·</span>
               <span class="text-sm font-semibold text-on-surface-variant">用户</span>
             </div>
-            <div class="max-w-[90%] md:max-w-2xl bg-primary-container text-white px-4 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-none shadow-sm">
-              <p class="whitespace-pre-wrap text-sm md:text-base">{{ m.text }}</p>
+            <div class="max-w-[90%] md:max-w-2xl bg-surface-container-high px-4 md:px-6 py-3 md:py-4 rounded-2xl rounded-tr-none shadow-card relative group">
+              <p class="whitespace-pre-wrap text-sm md:text-base text-on-surface user-select-text">{{ m.text }}</p>
             </div>
+            <button
+              @click="copyMessage(m.text)"
+              class="copy-btn mt-1 mr-1 w-7 h-7 bg-surface-container rounded-full flex items-center justify-center opacity-60 hover:opacity-100 hover:bg-surface-container-high transition-all"
+              :title="'复制消息'"
+            >
+              <span class="material-symbols-outlined text-[14px] text-on-surface-variant">content_copy</span>
+            </button>
           </div>
 
           <!-- 助手消息 -->
@@ -57,16 +64,13 @@
               <span class="text-xs text-outline">{{ formatTime(m.time) }}</span>
             </div>
             
-            <div class="bg-white rounded-2xl md:rounded-3xl p-4 md:p-8 shadow-sm shadow-on-surface/[0.02] border border-outline-variant/10 max-w-full md:max-w-4xl">
-              <div class="flex items-center gap-2 mb-4 md:mb-6">
-                <span class="material-symbols-outlined text-primary">auto_awesome</span>
-                <span class="font-bold text-primary tracking-tight text-sm md:text-base">LUMINARY 分析报告</span>
-              </div>
+            <div class="bg-surface rounded-2xl md:rounded-3xl p-5 md:p-7 shadow-card max-w-full md:max-w-4xl">
               
-              <!-- 思考步骤组件 -->
-              <ThinkingSteps 
-                v-if="m.thinkingState && !m.reactSteps"
-                :current-state="m.thinkingState"
+              <!-- DeepSeek 思考预览 (非ReAct模式或ReAct模式但无reactSteps时独立显示) -->
+              <DeepSeekThinkingPreview
+                v-if="m.reasoningText && !m.reactSteps"
+                :thinking-text="m.reasoningText"
+                :is-streaming="index === messages.length - 1 && (loading || streaming || isReActRunning)"
                 class="mb-4 md:mb-6"
               />
               
@@ -138,6 +142,13 @@
             </div>
 
             <div class="flex items-center gap-2 mt-2 md:mt-3 px-1 md:px-2">
+              <button
+                @click="copyMessage(m.text)"
+                class="copy-btn w-7 h-7 bg-surface-container rounded-full flex items-center justify-center opacity-60 hover:opacity-100 hover:bg-surface-container-high transition-all"
+                :title="'复制消息'"
+              >
+                <span class="material-symbols-outlined text-[14px] text-on-surface-variant">content_copy</span>
+              </button>
               <span class="text-[10px] font-bold text-primary/80 uppercase tracking-wide">Ex-Agent</span>
               <span class="text-xs text-outline">·</span>
             </div>
@@ -217,7 +228,7 @@
           <button 
             @click="sendStream" 
             :disabled="loading || streaming"
-            class="h-9 w-9 md:h-10 md:w-10 bg-black text-white rounded-lg md:rounded-xl flex items-center justify-center shadow-lg shadow-black/20 transition-transform active:scale-90 disabled:opacity-50 disabled:cursor-not-allowed"
+            class="h-9 w-9 md:h-10 md:w-10 bg-primary text-on-primary rounded-xl flex items-center justify-center shadow-md shadow-primary/20 transition-all active:scale-90 disabled:opacity-40 disabled:cursor-not-allowed hover:bg-primary/90"
           >
             <span v-if="loading || streaming" class="material-symbols-outlined animate-spin text-sm md:text-base">progress_activity</span>
             <span v-else class="material-symbols-outlined text-sm md:text-base">send</span>
@@ -405,11 +416,11 @@ import { useAppStore } from '../stores/appStore'
 import { useRoute } from 'vue-router'
 import api from '../services/api'
 import { sessionService } from '../services/sessions'
-import ThinkingSteps from '../components/gen-ui/ThinkingSteps.vue'
 import CitationHoverCard from '../components/gen-ui/CitationHoverCard.vue'
 import DocumentPreviewPanel from '../components/gen-ui/DocumentPreviewPanel.vue'
 import ReActModePrompt from '../components/gen-ui/ReActModePrompt.vue'
 import ReActThinkingDisplay from '../components/gen-ui/ReActThinkingDisplay.vue'
+import DeepSeekThinkingPreview from '../components/gen-ui/DeepSeekThinkingPreview.vue'
 import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
 import { marked } from 'marked'
 
@@ -494,34 +505,151 @@ const resetUI = () => {
   console.log('[DEBUG] UI reset complete')
 }
 
+// 标志位，防止watcher循环触发
+const isSyncingWithStore = ref(false)
+
 // 监听store中chatMessages的变化，同步到本地
 watch(() => store.chatMessages, (newMessages) => {
+  if (isSyncingWithStore.value) return
+  isSyncingWithStore.value = true
   console.log('[DEBUG] store.chatMessages changed:', newMessages.length, 'messages')
-  messages.value = [...newMessages]
-  // 如果是空数组，说明是新建会话，重置UI
+  
+  // 保存本地的 thinkingState（按消息ID）
+  const localThinkingStates = {}
+  messages.value.forEach(msg => {
+    if (msg.thinkingState) {
+      localThinkingStates[msg.id] = msg.thinkingState
+    }
+  })
+  
+  // 完全替换为新的消息列表，但保留匹配的 thinkingState
+  messages.value = newMessages.map(storeMsg => {
+    if (localThinkingStates[storeMsg.id]) {
+      return { ...storeMsg, thinkingState: localThinkingStates[storeMsg.id] }
+    }
+    return storeMsg
+  })
+  
+  // 当切换会话时，重置全局 ReAct 状态！防止之前会话的状态残留！
+  reactSteps.value = []
+  isReActRunning.value = false
+  
+  // 如果是空数组，说明是新建会话或切换到了空会话，重置UI
   if (newMessages.length === 0) {
     resetUI()
   }
+  
+  nextTick(() => {
+    isSyncingWithStore.value = false
+  })
+}, { deep: true })
+
+// 监听messages变化，同步thinkingState到store
+watch(messages, (newMessages) => {
+  if (isSyncingWithStore.value) return
+  isSyncingWithStore.value = true
+  
+  // 只在本地消息和store消息数量/顺序一致时，尝试同步 thinkingState
+  // 避免在添加新消息时覆盖 store
+  if (newMessages.length === store.chatMessages.length) {
+    // 检查是否有变化的 thinkingState，且消息ID匹配
+    let hasThinkingStateChange = false
+    const updatedMessages = store.chatMessages.map((storeMsg) => {
+      const localMsg = newMessages.find(m => m.id === storeMsg.id)
+      if (localMsg && localMsg.thinkingState && localMsg.thinkingState !== storeMsg.thinkingState) {
+        hasThinkingStateChange = true
+        return { ...storeMsg, thinkingState: localMsg.thinkingState }
+      }
+      return storeMsg
+    })
+    if (hasThinkingStateChange) {
+      store.updateChatMessages(updatedMessages)
+    }
+  }
+  
+  nextTick(() => {
+    isSyncingWithStore.value = false
+  })
 }, { deep: true })
 
 // 监听路由变化，确保在/chat页面时正确初始化
 watch(() => route.path, (newPath) => {
   if (newPath === '/chat') {
     console.log('[DEBUG] Route changed to /chat, syncing messages')
-    messages.value = [...store.chatMessages]
+    // 保留本地的 thinkingState
+    const currentThinkingStates = {}
+    messages.value.forEach(msg => {
+      if (msg.thinkingState) {
+        currentThinkingStates[msg.id] = msg.thinkingState
+      }
+    })
+    messages.value = [...store.chatMessages].map(msg => {
+      if (currentThinkingStates[msg.id]) {
+        return { ...msg, thinkingState: currentThinkingStates[msg.id] }
+      }
+      return msg
+    })
     resetUI()
   }
 })
 
+// 处理窗口可见性变化，确保 thinkingState 和 reasoningText 在切换窗口后不丢失
+const handleVisibilityChange = () => {
+  // 如果正在流式传输/加载中，不要强制同步，避免覆盖正在生成的内容！
+  if (document.visibilityState === 'visible' && !loading.value && !streaming.value && !isReActRunning.value) {
+    console.log('[DEBUG] Window became visible, syncing messages with thinkingState and reasoningText')
+    // 窗口重新可见时，同步消息并保留 thinkingState 和 reasoningText
+    const localThinkingStates = {}
+    const localReasoningTexts = {}
+    messages.value.forEach(msg => {
+      if (msg.thinkingState) {
+        localThinkingStates[msg.id] = msg.thinkingState
+      }
+      if (msg.reasoningText) {
+        localReasoningTexts[msg.id] = msg.reasoningText
+      }
+    })
+    messages.value = [...store.chatMessages].map(msg => {
+      if (localThinkingStates[msg.id]) {
+        msg.thinkingState = localThinkingStates[msg.id]
+      }
+      if (localReasoningTexts[msg.id]) {
+        msg.reasoningText = localReasoningTexts[msg.id]
+      }
+      return msg
+    })
+  }
+}
+
 onMounted(() => {
   window.addEventListener('resize', handleResize)
-  // 组件挂载时确保从store同步消息
-  messages.value = [...store.chatMessages]
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+  // 组件挂载时确保从store同步消息，同时保留本地的 thinkingState 和 reasoningText
+  const localThinkingStates = {}
+  const localReasoningTexts = {}
+  messages.value.forEach(msg => {
+    if (msg.thinkingState) {
+      localThinkingStates[msg.id] = msg.thinkingState
+    }
+    if (msg.reasoningText) {
+      localReasoningTexts[msg.id] = msg.reasoningText
+    }
+  })
+  messages.value = [...store.chatMessages].map(msg => {
+    if (localThinkingStates[msg.id]) {
+      msg.thinkingState = localThinkingStates[msg.id]
+    }
+    if (localReasoningTexts[msg.id]) {
+      msg.reasoningText = localReasoningTexts[msg.id]
+    }
+    return msg
+  })
   console.log('[DEBUG] ChatView mounted, messages:', messages.value.length)
 })
 
 onUnmounted(() => {
   window.removeEventListener('resize', handleResize)
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
   // 移除异步操作，避免组件卸载后仍在执行
   console.log('[DEBUG] ChatView unmounted')
 })
@@ -667,6 +795,17 @@ const toggleSourcesExpand = (message) => {
   message.sourcesExpanded = !message.sourcesExpanded
 }
 
+// 复制消息文本到剪贴板
+const copyMessage = async (text) => {
+  try {
+    await navigator.clipboard.writeText(text)
+    // 可以添加一个短暂的提示反馈
+    console.log('[DEBUG] Message copied to clipboard')
+  } catch (err) {
+    console.error('[ERROR] Failed to copy message:', err)
+  }
+}
+
 // 显示引用源悬停预览
 const showHoverSource = (event, source) => {
   const rect = event.target.getBoundingClientRect()
@@ -754,6 +893,8 @@ const sendStream = async () => {
     time: '正在生成...', 
     sources: [],
     thinkingState: null,
+    reasoningText: null,
+    reactSteps: null,
     components: []
   }
   messages.value.push(assistantMessage)
@@ -859,12 +1000,21 @@ const sendStream = async () => {
                 props: parsed.props
               })
               scrollToBottom()
+            } else if (parsed.type === 'reasoning_chunk' || parsed.type === 'react_reasoning_chunk') {
+              if (!messages.value[lastIndex].reasoningText) {
+                messages.value[lastIndex].reasoningText = ''
+              }
+              messages.value[lastIndex].reasoningText += parsed.content
+              scrollToBottom()
             } else if (parsed.type === 'react_thought') {
               reactSteps.value.push({
                 type: 'thought',
                 content: parsed.content,
+                reasoning: messages.value[lastIndex].reasoningText || '',
                 timestamp: Date.now()
               })
+              // Clear reasoning accumulator for next iteration
+              messages.value[lastIndex].reasoningText = ''
               messages.value[lastIndex].reactSteps = [...reactSteps.value]
               scrollToBottom()
             } else if (parsed.type === 'react_action') {
@@ -986,8 +1136,8 @@ async function saveMessageToDatabase(role, content, sources) {
     savingMessage.value = true
     console.log('[DEBUG] Saving message to database:', { role, content: content.substring(0, 50) + '...' })
     const savedMessage = await sessionService.addMessage(store.currentSessionId, role, content, sources)
-    // 重新加载会话列表以更新预览
-    await store.loadSessionsFromDatabase()
+    // 只刷新会话列表（更新预览信息），不重新加载消息（避免丢失正在流式传输的助手消息）
+    await store.refreshSessionList()
     console.log('[DEBUG] Message saved to database:', savedMessage)
     return savedMessage
   } catch (error) {
@@ -1048,35 +1198,38 @@ async function saveMessageToDatabase(role, content, sources) {
   transition: opacity 0.3s ease;
 }
 
-/* Markdown 内容样式 */
+/* Markdown 内容样式 - 与设计 token 对齐 */
 :deep(.markdown-content) {
   line-height: 1.8;
+  color: #0f172a;
 }
 
 :deep(.markdown-content h1) {
-  font-size: 1.875rem;
+  font-size: 1.75rem;
   font-weight: 800;
-  color: #1f2937;
+  color: #0f172a;
   margin-top: 1.5rem;
-  margin-bottom: 1rem;
+  margin-bottom: 0.75rem;
   padding-bottom: 0.5rem;
-  border-bottom: 2px solid #e5e7eb;
+  border-bottom: 2px solid #e2e8f0;
+  letter-spacing: -0.02em;
 }
 
 :deep(.markdown-content h2) {
-  font-size: 1.5rem;
+  font-size: 1.375rem;
   font-weight: 700;
-  color: #374151;
+  color: #1e293b;
   margin-top: 1.25rem;
-  margin-bottom: 0.75rem;
+  margin-bottom: 0.625rem;
   padding-bottom: 0.375rem;
-  border-bottom: 1px solid #e5e7eb;
+  border-bottom: 1px solid #e2e8f0;
+  letter-spacing: -0.01em;
 }
 
 :deep(.markdown-content h3) {
-  font-size: 1.25rem;
+  font-size: 1.15rem;
   font-weight: 600;
-  color: #4b5563;
+  color: #334155;
   margin-top: 1rem;
   margin-bottom: 0.5rem;
 }
@@ -1084,9 +1237,9 @@ async function saveMessageToDatabase(role, content, sources) {
 :deep(.markdown-content h4),
 :deep(.markdown-content h5),
 :deep(.markdown-content h6) {
-  font-size: 1.125rem;
+  font-size: 1.05rem;
   font-weight: 600;
-  color: #6b7280;
+  color: #475569;
   margin-top: 0.875rem;
   margin-bottom: 0.375rem;
 }
@@ -1094,17 +1247,17 @@ async function saveMessageToDatabase(role, content, sources) {
 :deep(.markdown-content p) {
   margin-top: 0.5rem;
   margin-bottom: 0.5rem;
-  color: #374151;
+  color: #1e293b;
 }
 
 :deep(.markdown-content strong) {
   font-weight: 700;
-  color: #111827;
+  color: #0f172a;
 }
 
 :deep(.markdown-content em) {
   font-style: italic;
-  color: #4b5563;
+  color: #334155;
 }
 
 :deep(.markdown-content ul),
@@ -1125,29 +1278,29 @@ async function saveMessageToDatabase(role, content, sources) {
 :deep(.markdown-content li) {
   margin-top: 0.25rem;
   margin-bottom: 0.25rem;
-  color: #374151;
+  color: #1e293b;
 }
 
 :deep(.markdown-content ul li::marker),
 :deep(.markdown-content ol li::marker) {
-  color: #3b82f6;
+  color: #4f46e5;
   font-weight: 600;
 }
 
 :deep(.markdown-content code) {
-  background-color: #f3f4f6;
+  background-color: #f1f5f9;
   color: #dc2626;
   padding: 0.125rem 0.375rem;
   border-radius: 0.375rem;
   font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
-  font-size: 0.875rem;
+  font-size: 0.85rem;
 }
 
 :deep(.markdown-content pre) {
-  background-color: #1f2937;
-  color: #e5e7eb;
+  background-color: #1e293b;
+  color: #f1f5f9;
   padding: 1rem;
-  border-radius: 0.5rem;
+  border-radius: 0.75rem;
   overflow-x: auto;
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
@@ -1162,13 +1315,13 @@ async function saveMessageToDatabase(role, content, sources) {
 }
 
 :deep(.markdown-content blockquote) {
-  border-left: 4px solid #3b82f6;
+  border-left: 4px solid #4f46e5;
   padding-left: 1rem;
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
-  color: #6b7280;
+  color: #475569;
   font-style: italic;
-  background-color: #eff6ff;
+  background-color: #eef2ff;
   padding-top: 0.5rem;
   padding-bottom: 0.5rem;
   padding-right: 0.75rem;
@@ -1176,13 +1329,13 @@ async function saveMessageToDatabase(role, content, sources) {
 }
 
 :deep(.markdown-content a) {
-  color: #3b82f6;
+  color: #4f46e5;
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 
 :deep(.markdown-content a:hover) {
-  color: #1d4ed8;
+  color: #4338ca;
 }
 
 :deep(.markdown-content table) {
@@ -1194,29 +1347,29 @@ async function saveMessageToDatabase(role, content, sources) {
 
 :deep(.markdown-content th),
 :deep(.markdown-content td) {
-  border: 1px solid #e5e7eb;
+  border: 1px solid #e2e8f0;
   padding: 0.5rem 0.75rem;
   text-align: left;
 }
 
 :deep(.markdown-content th) {
-  background-color: #f9fafb;
+  background-color: #f8fafc;
   font-weight: 600;
-  color: #374151;
+  color: #1e293b;
 }
 
 :deep(.markdown-content tr:nth-child(even)) {
-  background-color: #f9fafb;
+  background-color: #f8fafc;
 }
 
 :deep(.markdown-content tr:hover) {
-  background-color: #f3f4f6;
+  background-color: #f1f5f9;
 }
 
 :deep(.markdown-content hr) {
   border: none;
   height: 1px;
-  background-color: #e5e7eb;
+  background-color: #e2e8f0;
   margin-top: 1.5rem;
   margin-bottom: 1.5rem;
 }
@@ -1227,5 +1380,16 @@ async function saveMessageToDatabase(role, content, sources) {
   border-radius: 0.5rem;
   margin-top: 0.75rem;
   margin-bottom: 0.75rem;
+}
+
+/* 用户消息文本选中样式 - 确保选中时能清晰看到 */
+.user-select-text::selection {
+  background-color: #4f46e5;
+  color: #ffffff;
+}
+
+.user-select-text::-moz-selection {
+  background-color: #4f46e5;
+  color: #ffffff;
 }
 </style>

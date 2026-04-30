@@ -46,12 +46,12 @@ const canvasWidth = ref(600)
 const canvasHeight = ref(300)
 
 const colors = [
-  '#6750A4', // Primary
-  '#006A6A', // Tertiary
-  '#7D5260', // Error
-  '#625B71', // Secondary
-  '#0061A4',
-  '#954DA1'
+  '#4f46e5', // Primary (indigo)
+  '#059669', // Tertiary (emerald)
+  '#dc2626', // Error (red)
+  '#475569', // Secondary (slate)
+  '#3b82f6', // Info (blue)
+  '#8b5cf6', // Violet
 ]
 
 const drawChart = () => {
@@ -74,7 +74,7 @@ const drawChart = () => {
   const valueRange = maxValue - minValue || 1
   
   // 绘制 Y 轴刻度
-  ctx.strokeStyle = '#CAC4D0'
+  ctx.strokeStyle = '#e2e8f0'
   ctx.lineWidth = 1
   ctx.beginPath()
   ctx.moveTo(padding.left, padding.top)
@@ -88,7 +88,7 @@ const drawChart = () => {
   ctx.stroke()
   
   // 绘制网格线和 Y 轴标签
-  ctx.fillStyle = '#49454F'
+  ctx.fillStyle = '#475569'
   ctx.font = '12px sans-serif'
   ctx.textAlign = 'right'
   
@@ -98,14 +98,14 @@ const drawChart = () => {
     const value = maxValue - (valueRange * i / gridLines)
     
     // 网格线
-    ctx.strokeStyle = '#E7E0EC'
+    ctx.strokeStyle = '#f1f5f9'
     ctx.beginPath()
     ctx.moveTo(padding.left, y)
     ctx.lineTo(width - padding.right, y)
     ctx.stroke()
     
     // Y 轴标签
-    ctx.fillStyle = '#49454F'
+    ctx.fillStyle = '#475569'
     ctx.fillText(value.toFixed(1), padding.left - 10, y + 4)
   }
   
@@ -124,13 +124,13 @@ const drawChart = () => {
       ctx.fillRect(x, y, barWidth, barHeight)
       
       // 绘制 X 轴标签
-      ctx.fillStyle = '#49454F'
+      ctx.fillStyle = '#475569'
       ctx.font = '12px sans-serif'
       ctx.textAlign = 'center'
       ctx.fillText(label, x + barWidth / 2, height - padding.bottom + 20)
       
       // 绘制数值标签
-      ctx.fillStyle = '#1D1B20'
+      ctx.fillStyle = '#0f172a'
       ctx.font = 'bold 12px sans-serif'
       ctx.fillText(props.values[i].toString(), x + barWidth / 2, y - 8)
     })
@@ -170,13 +170,13 @@ const drawChart = () => {
       ctx.fill()
       
       // X 轴标签
-      ctx.fillStyle = '#49454F'
+      ctx.fillStyle = '#475569'
       ctx.font = '12px sans-serif'
       ctx.textAlign = 'center'
       ctx.fillText(props.labels[i], x, height - padding.bottom + 20)
       
       // 数值标签
-      ctx.fillStyle = '#1D1B20'
+      ctx.fillStyle = '#0f172a'
       ctx.font = 'bold 12px sans-serif'
       ctx.fillText(value.toString(), x, y - 12)
     })

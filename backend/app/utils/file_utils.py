@@ -4,10 +4,13 @@ Helpers for saving and listing uploaded files and metadata
 import aiofiles
 import os
 import json
+import logging
 from pathlib import Path
 from app.core.config import UPLOAD_DIR, METADATA_PATH, ensure_data_dirs
 from fastapi import UploadFile
 import datetime
+
+logger = logging.getLogger(__name__)
 
 
 async def save_upload(file: UploadFile) -> str:
@@ -68,10 +71,8 @@ def delete_uploaded_file(filename: str):
             
             if to_delete:
                 collection.delete(ids=to_delete)
-                print(f"[DEBUG] Deleted {len(to_delete)} vectors for file: {filename}")
+                logger.debug("Deleted %d vectors for file: %s", len(to_delete), filename)
             else:
-                print(f"[DEBUG] No vectors found for file: {filename}")
+                logger.debug("No vectors found for file: %s", filename)
     except Exception as e:
-        print(f"[ERROR] Failed to delete vectors for {filename}: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error("Failed to delete vectors for %s: %s", filename, e, exc_info=True)

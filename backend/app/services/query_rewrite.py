@@ -153,7 +153,7 @@ class QueryRewriteService:
             # 正确访问 response 对象的属性
             if hasattr(response, "message") and hasattr(response.message, "content"):
                 rewritten = response.message.content.strip()
-                print(f"改写结果: {rewritten}")
+                logger.debug("Rewritten query: %s", rewritten)
                 logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
                 return rewritten
             

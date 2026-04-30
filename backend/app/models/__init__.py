@@ -10,6 +10,7 @@ from app.models.document import Document
 from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.models.audit_log import AuditLog
+from app.models.parent_document import ParentDocumentModel
 
 __all__ = [
     'Base',
@@ -21,4 +22,5 @@ __all__ = [
     'Permission',
     'RolePermission',
     'AuditLog',
+    'ParentDocumentModel',
 ]

@@ -1,21 +1,21 @@
 {
-  "provider": "openai",
+  "provider": "deepseek",
   "embedding_mode": "openai",
   "local_embedding_model": "BAAI/bge-small-zh-v1.5",
   "local_model_cache_dir": "",
-  "openai_base_url": "https://api.openai.com/v1",
+  "openai_base_url": "https://api.openai-hk.com/v1",
   "openai_embedding_model": "text-embedding-3-small",
   "openai_chat_model": "gpt-3.5-turbo",
   "ollama_url": "http://localhost:11434",
-  "ollama_model": "",
+  "ollama_model": "llama2",
   "chunk_size": 1500,
   "chunk_overlap": 225,
   "temperature": 0.7,
   "top_k": 5,
   "top_p": 0.9,
   "max_tokens": 2048,
-  "presence_penalty": 0.0,
-  "frequency_penalty": 0.0,
+  "presence_penalty": 0,
+  "frequency_penalty": 0,
   "max_history": 10,
   "upload_max_size": 104857600,
   "allow_user_registration": false,
@@ -45,14 +45,27 @@
     "exclude_questionable_messages": false
   },
   "timeouts": {
-    "enabled": true,
+    "enabled": false,
     "requests_post": 60,
     "requests_stream": 60,
     "document_summary": 300,
     "skill_executor_python": 60,
     "skill_executor_shell": 60,
     "react_agent_subprocess": 60,
-    "docx2markdown_subprocess": 300
+    "docx2markdown_subprocess": 300,
+    "pdf_conversion_subprocess": 1800
+  },
+  "parent_document_retrieval": {
+    "enabled": true,
+    "parent_max_chars": 8000,
+    "parent_min_chars": 300,
+    "parent_max_count": 5,
+    "child_chunk_size": 300,
+    "child_chunk_overlap": 60,
+    "child_retrieve_count": 20,
+    "parent_max_chars_total": 12000,
+    "enable_distance_scoring": true,
+    "fallback_to_hybrid": true
   },
   "skills": {
     "enabled": true,
@@ -69,5 +82,8 @@
       "enabled": true,
       "max_results": 5
     }
-  }
+  },
+  "deepseek_base_url": "https://api.deepseek.com/v1",
+  "deepseek_chat_model": "deepseek-v4-flash",
+  "deepseek_reasoner_model": "deepseek-v4-pro"
 }

@@ -1,10 +1,13 @@
 """
 Audit log service
 """
+import logging
 from typing import Optional
 from sqlalchemy.orm import Session
 from app.models.audit_log import AuditLog
 from app.models.user import User
+
+logger = logging.getLogger(__name__)
 
 
 def log_action(
@@ -52,6 +55,6 @@ def log_action(
     
     # Also log to console for immediate visibility
     user_str = user.username if user else 'system'
-    print(f"[AUDIT] {user_str} - {action} - {resource_type or 'N/A'}:{resource_id or 'N/A'}")
+    logger.info("AUDIT: %s - %s - %s:%s", user_str, action, resource_type or 'N/A', resource_id or 'N/A')
     
     return audit_log
