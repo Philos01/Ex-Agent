@@ -83,13 +83,16 @@
               />
               
               <div class="text-on-surface leading-relaxed text-base md:text-[17px] space-y-3 md:space-y-4">
-                <div v-if="m.text === '' && index === messages.length - 1 && (loading || streaming) && !m.thinkingState" class="flex items-center gap-2 py-2">
+                <!-- 加载动画：文字为空且正在处理中，持续显示直到有内容 -->
+                <div v-if="m.text === '' && index === messages.length - 1 && (loading || streaming)" class="flex items-center gap-2 py-2">
                   <div class="flex gap-1">
                     <div class="w-2 h-2 bg-primary rounded-full animate-bounce" :style="{ animationDelay: '0ms' }"></div>
                     <div class="w-2 h-2 bg-primary rounded-full animate-bounce" :style="{ animationDelay: '150ms' }"></div>
                     <div class="w-2 h-2 bg-primary rounded-full animate-bounce" :style="{ animationDelay: '300ms' }"></div>
                   </div>
-                  <span class="text-on-surface-variant text-sm">正在生成...</span>
+                  <span class="text-on-surface-variant text-sm">
+                    {{ m.thinkingState?.message || '正在生成...' }}
+                  </span>
                 </div>
                 <div v-else-if="m.text" v-html="renderMarkdown(m.text)" class="markdown-content"></div>
               </div>
@@ -181,42 +184,18 @@
         <div class="absolute inset-0 bg-primary/5 blur-xl rounded-full opacity-0 group-focus-within:opacity-100 transition-opacity"></div>
         <div class="relative flex items-end gap-2 md:gap-4 bg-surface-container-lowest p-2 md:p-3 rounded-xl md:rounded-2xl shadow-lg shadow-on-surface/[0.03] border border-outline-variant/20 focus-within:border-primary/40 transition-all">
           
-          <button
-            @click="toggleThinking"
-            :class="[
-              'flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all',
-              params.enable_thinking 
-                ? 'bg-primary/10 text-primary' 
-                : 'bg-surface-container-high text-on-surface-variant'
-            ]"
+          <ModeSelector
+            :enable-thinking="params.enable_thinking"
+            :reasoning-effort="params.reasoning_effort"
+            :use-react="params.use_react"
+            :use-graph="params.use_graph"
             :disabled="loading || streaming"
-            :title="params.enable_thinking ? '禁用思考模式' : '启用思考模式'"
-          >
-            <span class="material-symbols-outlined text-base md:text-lg" style="font-variation-settings: 'FILL' 1">
-              {{ params.enable_thinking ? 'psychology' : 'psychology_alt' }}
-            </span>
-            <span class="text-xs font-semibold">
-              {{ params.enable_thinking ? 'Thinking' : 'Unthinking' }}
-            </span>
-          </button>
-          <button
-            @click="toggleReAct"
-            :class="[
-              'flex items-center gap-1.5 px-3 py-2 rounded-lg transition-all',
-              params.use_react 
-                ? 'bg-tertiary/10 text-tertiary' 
-                : 'bg-surface-container-high text-on-surface-variant'
-            ]"
-            :disabled="loading || streaming"
-            :title="params.use_react ? '禁用 ReAct 多步推理模式' : '启用 ReAct 多步推理模式'"
-          >
-            <span class="material-symbols-outlined text-base md:text-lg" style="font-variation-settings: 'FILL' 1">
-              {{ params.use_react ? 'hub' : 'hub' }}
-            </span>
-            <span class="text-xs font-semibold">
-              {{ params.use_react ? 'ReAct' : 'No ReAct' }}
-            </span>
-          </button>
+            @update:enable-thinking="handleThinkingUpdate"
+            @update:reasoning-effort="handleEffortUpdate"
+            @update:use-react="handleReActUpdate"
+            @update:use-graph="handleGraphUpdate"
+            @show-react-prompt="handleReActPromptFromModeSelector"
+          />
           <textarea 
             v-model="q" 
             @keydown="handleKeyDown"
@@ -376,6 +355,34 @@
             />
           </div>
 
+          <!-- 思考模式状态 -->
+          <div class="p-4 bg-surface-container rounded-xl space-y-3">
+            <h4 class="text-sm font-bold text-on-surface mb-3">思考模式状态</h4>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-on-surface-variant">模式状态</span>
+              <span 
+                class="px-3 py-1 rounded-full text-xs font-bold"
+                :class="params.enable_thinking ? 'bg-primary/10 text-primary' : 'bg-surface-container-high text-on-surface-variant'"
+              >
+                {{ params.enable_thinking ? '已启用' : '已禁用' }}
+              </span>
+            </div>
+            <div class="flex items-center justify-between">
+              <span class="text-xs text-on-surface-variant">思考强度</span>
+              <span 
+                class="px-3 py-1 rounded-full text-xs font-bold"
+                :class="{
+                  'bg-error/10 text-error': params.reasoning_effort === 'max',
+                  'bg-primary/10 text-primary': params.reasoning_effort === 'high',
+                  'bg-tertiary/10 text-tertiary': params.reasoning_effort === 'medium',
+                  'bg-surface-container-high text-on-surface-variant': params.reasoning_effort === 'low'
+                }"
+              >
+                {{ params.reasoning_effort ? params.reasoning_effort.toUpperCase() : 'HIGH' }}
+              </span>
+            </div>
+          </div>
+
           <!-- 重置按钮 -->
           <button 
             @click="resetParams"
@@ -421,6 +428,7 @@ import DocumentPreviewPanel from '../components/gen-ui/DocumentPreviewPanel.vue'
 import ReActModePrompt from '../components/gen-ui/ReActModePrompt.vue'
 import ReActThinkingDisplay from '../components/gen-ui/ReActThinkingDisplay.vue'
 import DeepSeekThinkingPreview from '../components/gen-ui/DeepSeekThinkingPreview.vue'
+import ModeSelector from '../components/gen-ui/ModeSelector.vue'
 import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
 import { marked } from 'marked'
 
@@ -456,7 +464,7 @@ const messages = ref([...store.chatMessages])
 const loading = ref(false)
 const streaming = ref(false)
 const showSidebar = ref(false)
-const params = ref({ ...store.chatParams, use_react: false })
+const params = ref({ ...store.chatParams, use_react: false, use_graph: true, reasoning_effort: store.chatParams.reasoning_effort || 'high' })
 const endRef = ref(null)
 const scrollRef = ref(null)
 const windowWidth = ref(window.innerWidth)
@@ -675,25 +683,44 @@ const resetParams = () => {
     presence_penalty: 0.0,
     frequency_penalty: 0.0,
     enable_thinking: false,
-    use_react: false
+    use_react: false,
+    reasoning_effort: 'high'
   }
   updateParams()
 }
 
-const toggleThinking = () => {
-  params.value.enable_thinking = !params.value.enable_thinking
-  updateParams()
-}
-
-const toggleReAct = () => {
-  const newVal = !params.value.use_react
-  params.value.use_react = newVal
-  updateParams()
-  
-  // 如果开启 ReAct 模式，检查是否需要显示提示
-  if (newVal && promptRef.value && promptRef.value.checkShouldShow()) {
+const handleReActPromptFromModeSelector = () => {
+  // 检查是否应该显示提示（尊重用户的"不再显示"选择）
+  if (shouldShowReActPrompt()) {
     showReActPrompt.value = true
   }
+}
+
+// 统一的 ReAct 提示显示判断函数
+const shouldShowReActPrompt = () => {
+  if (!promptRef.value) return true
+  return promptRef.value.checkShouldShow()
+}
+
+// ModeSelector 组件的事件处理函数
+const handleThinkingUpdate = (value) => {
+  params.value.enable_thinking = value
+  updateParams()
+}
+
+const handleEffortUpdate = (value) => {
+  params.value.reasoning_effort = value
+  updateParams()
+}
+
+const handleReActUpdate = (value) => {
+  params.value.use_react = value
+  updateParams()
+}
+
+const handleGraphUpdate = (value) => {
+  params.value.use_graph = value
+  updateParams()
 }
 
 const handleSampleQuestion = (question) => {
@@ -912,10 +939,22 @@ const sendStream = async () => {
     const historyMessages = []
     for (let i = 0; i < messages.value.length - 2; i++) {
       const msg = messages.value[i]
-      historyMessages.push({
+      const historyMsg = {
         role: msg.role,
         content: msg.text
-      })
+      }
+
+      // 如果是助手消息且在 ReAct 模式下有工具调用，保留 reasoning_content
+      if (msg.role === 'assistant' && msg.reactSteps && msg.reactSteps.length > 0) {
+        historyMsg.had_tool_calls = true
+        historyMsg.reasoning_content = msg.reasoningText || ''
+      } else if (msg.role === 'assistant' && msg.reasoningText) {
+        // 非工具调用但有 reasoning_text，标记为无工具调用
+        historyMsg.had_tool_calls = false
+        // 不传递 reasoning_content，后端会过滤
+      }
+
+      historyMessages.push(historyMsg)
     }
     
     console.log('[DEBUG] Sending request with params:', {
@@ -928,6 +967,7 @@ const sendStream = async () => {
       frequency_penalty: params.value.frequency_penalty,
       enable_thinking: params.value.enable_thinking,
       use_react: params.value.use_react,
+      use_graph: params.value.use_graph,
       history_count: historyMessages.length
     })
     
@@ -944,7 +984,9 @@ const sendStream = async () => {
         presence_penalty: params.value.presence_penalty,
         frequency_penalty: params.value.frequency_penalty,
         enable_thinking: params.value.enable_thinking,
+        reasoning_effort: params.value.reasoning_effort,
         use_react: params.value.use_react,
+        use_graph: params.value.use_graph,
         messages: historyMessages
       })
     })
@@ -1099,9 +1141,12 @@ const sendStream = async () => {
     
     // 保存助手消息到数据库
     if (fullText) {
+      const lastIndex = messages.value.length - 1
+      // 确保 assistant 消息包含完整的元数据
+      messages.value[lastIndex].had_tool_calls = !!(messages.value[lastIndex].reactSteps && messages.value[lastIndex].reactSteps.length > 0)
+
       const savedAssistantMessage = await saveMessageToDatabase('assistant', fullText, sources)
       if (savedAssistantMessage) {
-        const lastIndex = messages.value.length - 1
         messages.value[lastIndex].id = savedAssistantMessage.id
       }
     }

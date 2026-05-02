@@ -1,0 +1,11 @@
+{
+  "owner": "community",
+  "slug": "web-search",
+  "displayName": "Web Search (网页搜索)",
+  "latest": {
+    "version": "1.0.0",
+    "publishedAt": 1746134400000,
+    "commit": ""
+  },
+  "history": []
+}

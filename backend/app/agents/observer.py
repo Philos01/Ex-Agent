@@ -18,7 +18,7 @@ class Observer:
 
     COMPRESSION_CONFIG: Dict[str, dict] = {
         "arxiv_search": {
-            "max_papers_in_scratchpad": 3,
+            "max_papers_in_scratchpad": 5,  # 改为默认 5 篇
             "abstract_max_chars": 150,
         },
         "weather": {
@@ -31,6 +31,14 @@ class Observer:
         },
     }
 
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        # 如果有配置，覆盖默认值
+        if "arxiv_search" in self.config:
+            max_results = self.config["arxiv_search"].get("max_results")
+            if max_results:
+                self.COMPRESSION_CONFIG["arxiv_search"]["max_papers_in_scratchpad"] = max_results
+
     def process(self, result: ActionResult) -> Dict[str, Any]:
         """
         Process an action result into an observation summary.
@@ -39,7 +47,12 @@ class Observer:
         """
         obs_type = self._infer_type(result)
 
-        compressed = self.compress(result.output, obs_type, result.tool_name)
+        # 从 params_used 中提取 max_results（如果用户指定了）
+        max_results_override = None
+        if hasattr(result, 'params_used') and result.params_used:
+            max_results_override = result.params_used.get('max_results') or result.params_used.get('count')
+
+        compressed = self.compress(result.output, obs_type, result.tool_name, max_results_override)
 
         return {
             "compressed": compressed,
@@ -56,6 +69,7 @@ class Observer:
         text: str,
         obs_type: str = "default",
         tool_name: str = "",
+        max_results_override: Optional[int] = None,
     ) -> str:
         """Compress observation text by type."""
         if not text:
@@ -69,6 +83,11 @@ class Observer:
                 obs_type = "weather"
 
         config = self.COMPRESSION_CONFIG.get(obs_type, self.COMPRESSION_CONFIG["default"])
+
+        # 如果用户指定了 max_results，覆盖默认值
+        if obs_type == "arxiv_search" and max_results_override is not None:
+            config = config.copy()
+            config["max_papers_in_scratchpad"] = max_results_override
 
         if obs_type == "arxiv_search":
             return self._compress_arxiv(text, config)

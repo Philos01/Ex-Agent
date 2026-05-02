@@ -101,10 +101,18 @@ class SkillManager:
         return None
 
     def should_use_skill(
-        self, question: str, provider: str = "openai"
+        self,
+        question: str,
+        provider: str = "openai",
+        conversation_history: str = "",
     ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
         """
         Determine if a skill should be used for the given question.
+
+        Args:
+            question: User question
+            provider: LLM provider
+            conversation_history: Optional recent conversation context
 
         Returns:
             Tuple of (should_use, skill_name, params)
@@ -112,54 +120,34 @@ class SkillManager:
         if not self.enabled:
             return False, None, None
 
-        return self.skill_selector.select_skill_with_llm(question, provider=provider)
+        return self.skill_selector.select_skill_with_llm(
+            question,
+            provider=provider,
+            conversation_history=conversation_history,
+        )
 
     def execute_skill(self, skill_name: str, **kwargs) -> Dict[str, Any]:
         """
-        Execute a skill.
+        Execute a skill. Parameters are passed through directly —
+        the LLM extracts them according to the skill's input_parameters schema.
 
         Returns:
             Execution result dictionary
         """
-        logger.info("[SkillManager] Executing skill: {}, params: {}".format(skill_name, kwargs))
-
-        kwargs = self._normalize_params(skill_name, kwargs)
+        logger.info("[SkillManager] Executing skill: %s, params: %s", skill_name, kwargs)
 
         skill_dir = self.skill_selector.get_skill_dir(skill_name)
         if skill_dir:
-            logger.info("[SkillManager] Executing package skill: {}".format(skill_name))
+            logger.info("[SkillManager] Executing package skill: %s", skill_name)
             executor = SkillExecutor(skill_dir)
             result = executor.execute(kwargs)
-            logger.info("[SkillManager] Package skill result: success={}".format(result.get("success", False)))
+            logger.info("[SkillManager] Package skill result: success=%s", result.get("success", False))
             return result
 
         return {
             "success": False,
             "error": "Skill not found: {}".format(skill_name)
         }
-
-    def _normalize_params(
-        self, skill_name: str, params: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        """Normalize skill parameters with common alias mappings"""
-        if not params:
-            return params
-        normalized = dict(params)
-
-        if skill_name == "amap-weather":
-            if "location" in normalized and "city" not in normalized:
-                normalized["city"] = normalized["location"]
-
-        elif skill_name == "arxiv-watcher":
-            if "search_query" in normalized and "query" not in normalized:
-                normalized["query"] = normalized["search_query"]
-            if "max_results" in normalized and "count" not in normalized:
-                try:
-                    normalized["count"] = int(normalized["max_results"])
-                except (ValueError, TypeError):
-                    pass
-
-        return normalized
 
     def format_skill_result(self, result: Dict[str, Any]) -> str:
         """

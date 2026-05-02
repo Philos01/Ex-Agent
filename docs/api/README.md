@@ -487,75 +487,32 @@ data: [DONE]
 
 ---
 
-## v1 API 接口
+## 图结构知识库 API
 
-v1 API 提供更规范的接口设计，所有接口都需要认证（除了明确标注的）。
+以下为新增的图结构知识库相关接口。
 
-### v1 认证接口
-
-#### 用户登录
+#### 查看图谱可视化
 ```
-POST /api/v1/auth/login
+GET /api/graph/view
 ```
+浏览器中直接查看交互式知识图谱 HTML。
 
-#### 获取当前用户
+#### 生成/刷新可视化
 ```
-GET /api/v1/auth/me
-```
-
-### v1 业务接口
-
-#### 问答
-```
-POST /api/v1/qa
+GET /api/graph/visualize
 ```
 
-#### 上传文档
+#### 图统计信息
 ```
-POST /api/v1/upload
+GET /api/graph/stats
 ```
+返回节点数、边数、文档数、实体类型分布。
 
-#### 获取文档列表
+#### 社区检测
 ```
-GET /api/v1/documents
+GET /api/graph/communities
 ```
-
-#### 删除文档
-```
-DELETE /api/v1/documents/{filename}
-```
-
-#### 获取配置
-```
-GET /api/v1/config
-```
-
-#### 更新配置
-```
-POST /api/v1/config
-```
-
-#### 获取向量库状态
-```
-GET /api/v1/vector-store/status
-```
-
-#### 重置向量库
-```
-POST /api/v1/vector-store/reset
-```
-
-### v1 技能接口
-
-#### 获取可用技能列表
-```
-GET /api/v1/skills
-```
-
-#### 执行技能
-```
-POST /api/v1/skills/execute
-```
+返回图社区检测结果，展示主题聚类。
 
 ---
 

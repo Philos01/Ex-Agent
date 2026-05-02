@@ -402,12 +402,13 @@ def _stream_answer_react(question: str, provider: str = "openai", messages: List
     logger.debug("[_stream_answer_react] Done, %d events processed", event_count)
 
 
-def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None, 
-                  top_p: float = None, max_tokens: int = None, 
+def stream_answer(question: str, provider: str = "openai", top_k: int = 5, temperature: float = None,
+                  top_p: float = None, max_tokens: int = None,
                   presence_penalty: float = None, frequency_penalty: float = None,
                   enable_thinking: bool = None, use_react: bool = None,
                   messages: List[dict] = None, include_state: bool = False,
-                  use_skill: bool = None, skill_name: str = None, skill_params: dict = None):
+                  use_skill: bool = None, skill_name: str = None, skill_params: dict = None,
+                  reasoning_effort: str = None):
     """
     流式回答问题
     
@@ -439,7 +440,10 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
         resolved_skill_params = skill_params or {}
     else:
         skill_manager = get_skill_manager()
-        should_use_skill_flag, resolved_skill_name, resolved_skill_params = skill_manager.should_use_skill(question, provider=provider)
+        conv_history = _format_conversation_history(messages)
+        should_use_skill_flag, resolved_skill_name, resolved_skill_params = skill_manager.should_use_skill(
+            question, provider=provider, conversation_history=conv_history
+        )
     
     logger.debug("[QA] question=%s, use_skill=%s, skill=%s, params=%s",
                  question[:50], should_use_skill_flag, resolved_skill_name, resolved_skill_params)
@@ -804,18 +808,55 @@ def stream_answer(question: str, provider: str = "openai", top_k: int = 5, tempe
             client, model_name = _get_client_for_provider(cfg, provider, enable_thinking=et)
             logger.debug("Stream: provider=%s, model=%s", provider, model_name)
 
+            # 构建多轮对话 messages
+            api_messages = []
+
+            # 添加历史消息（过滤 reasoning_content）
+            if messages:
+                for msg in messages:
+                    if msg.get("role") == "assistant" and not msg.get("had_tool_calls", False):
+                        # 非工具调用轮次：只保留 role 和 content
+                        api_messages.append({
+                            "role": "assistant",
+                            "content": msg.get("content", "")
+                        })
+                    elif msg.get("role") == "assistant" and msg.get("had_tool_calls", False):
+                        # 工具调用轮次：保留完整信息包括 reasoning_content
+                        api_messages.append({
+                            "role": "assistant",
+                            "content": msg.get("content", ""),
+                            "reasoning_content": msg.get("reasoning_content", "")
+                        })
+                    else:
+                        api_messages.append(msg)
+
+            # 添加当前用户消息
+            api_messages.append({"role": "user", "content": prompt})
+
             api_kwargs: Dict[str, Any] = dict(
                 model=model_name,
-                messages=[{"role": "user", "content": prompt}],
+                messages=api_messages,
                 max_tokens=mt,
                 stream=True,
-                presence_penalty=pp,
-                frequency_penalty=fp,
             )
             # deepseek-reasoner does not support temperature/top_p
             if not (provider == "deepseek" and et):
                 api_kwargs["temperature"] = temp
                 api_kwargs["top_p"] = tp
+                api_kwargs["presence_penalty"] = pp
+                api_kwargs["frequency_penalty"] = fp
+
+            # 如果启用思考模式，添加 thinking 和 reasoning_effort 参数
+            if provider == "deepseek" and et:
+                effort = reasoning_effort or "high"
+                # 映射规则：low/medium -> high, xhigh -> max
+                if effort in ("low", "medium"):
+                    effort = "high"
+                elif effort == "xhigh":
+                    effort = "max"
+
+                api_kwargs["reasoning_effort"] = effort
+                api_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
 
             stream = client.chat.completions.create(**api_kwargs)
 

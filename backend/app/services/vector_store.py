@@ -90,20 +90,29 @@ def get_client():
     return _client
 
 
+def _get_collection_name() -> str:
+    """Collection name keyed by embedding dimension to prevent mismatch."""
+    _init_embedding_service()
+    dim = EmbeddingService.get_embedding_dimension()
+    return f"lab_docs_{dim}d"
+
+
 def init_collection():
-    """初始化或获取向量库集合"""
-    global _collection
+    """初始化或获取向量库集合（自动适配嵌入维度）"""
+    global _collection, _embedding_initialized
     if _collection is None:
+        _init_embedding_service()
         client = get_client()
+        name = _get_collection_name()
         try:
-            _collection = client.get_or_create_collection("lab_docs")
+            _collection = client.get_or_create_collection(name)
+            logger.info("Collection ready: %s (%d docs)", name, _collection.count())
         except Exception as e:
-            logger.warning(f"Collection init error: {e}")
-            # Last resort: clean cache and retry
+            logger.warning(f"Collection init error ({name}): {e}")
             _clean_hnsw_cache()
             try:
-                _collection = client.get_or_create_collection("lab_docs")
-                logger.info("Collection created after cache cleanup")
+                _collection = client.get_or_create_collection(name)
+                logger.info("Collection created after cache cleanup: %s", name)
             except Exception as e2:
                 logger.error(f"Collection init failed after cleanup: {e2}")
                 _collection = None
@@ -119,20 +128,22 @@ def startup_health_check() -> dict:
         {"healthy": bool, "doc_count": int, "message": str}
     """
     global _collection
-    client = get_client()  # Triggers _clean_hnsw_cache() on first call
+    _init_embedding_service()
+    name = _get_collection_name()
+    client = get_client()
 
     try:
-        _collection = client.get_or_create_collection("lab_docs")
+        _collection = client.get_or_create_collection(name)
         count = _collection.count()
-        logger.info(f"Startup health check: OK, {count} documents")
+        logger.info(f"Startup health check: OK, {count} documents in {name}")
         return {"healthy": True, "doc_count": count,
-                "message": f"Vector store healthy, {count} documents"}
+                "message": f"Vector store healthy ({name}), {count} documents"}
     except Exception as e:
-        logger.warning(f"Startup health check: collection access failed, "
+        logger.warning(f"Startup health check: {name} access failed, "
                        f"attempting repair: {e}")
         _clean_hnsw_cache()
         try:
-            _collection = client.get_or_create_collection("lab_docs")
+            _collection = client.get_or_create_collection(name)
             count = _collection.count()
             logger.info(f"Startup health check: repaired, {count} documents")
             return {"healthy": True, "doc_count": count,
@@ -146,16 +157,21 @@ def startup_health_check() -> dict:
 def reset_collection():
     """
     Reset collection (e.g., for embedding mode switch).
-    Data in chroma.sqlite3 is preserved within ChromaDB's internal storage.
+    Deletes the CURRENT dimension's collection and recreates it.
+    Old collections with other dimensions are preserved on disk.
     """
     global _collection
     _collection = None
+    _init_embedding_service()
+    name = _get_collection_name()
     client = get_client()
     try:
-        client.delete_collection("lab_docs")
+        client.delete_collection(name)
+        logger.info("Deleted collection: %s", name)
     except Exception:
         pass
-    _collection = client.get_or_create_collection("lab_docs")
+    _collection = client.get_or_create_collection(name)
+    logger.info("Recreated collection: %s", name)
     return _collection
 
 
@@ -185,12 +201,31 @@ def add_documents(ids: List[str], documents: List[str],
             logger.debug("Added %d documents to vector store", len(documents))
         except Exception as e:
             error_str = str(e).lower()
+
+            # Dimension mismatch: switch to the correct collection for this model
+            if "dimension" in error_str or "expecting embedding" in error_str:
+                current_dim = EmbeddingService.get_embedding_dimension()
+                logger.warning(
+                    "Embedding dimension mismatch. Recreating collection for %dd. Error: %s",
+                    current_dim, e,
+                )
+                global _collection
+                client = get_client()
+                name = _get_collection_name()
+                try:
+                    client.delete_collection(name)
+                except Exception:
+                    pass
+                _collection = client.get_or_create_collection(name)
+                _collection.add(**kwargs)
+                logger.info("文档已添加到新集合: %s", name)
+                return
+
             hnsw_keywords = ["hnsw", "compaction", "segment reader",
                              "loading index", "backfill", "corrupt"]
             is_hnsw = any(kw in error_str for kw in hnsw_keywords)
 
-            if is_hnsw or "dimension" in error_str or \
-               ("collection" in error_str and "does not exist" in error_str):
+            if is_hnsw or ("collection" in error_str and "does not exist" in error_str):
                 logger.warning(f"向量库异常，清理 HNSW 缓存后重试: {e}")
                 _clean_hnsw_cache()
                 collection = init_collection()
@@ -360,9 +395,12 @@ def get_collection_info():
         return {"error": "Collection not available", "count": 0}
     try:
         count = collection.count()
+        _init_embedding_service()
+        dim = EmbeddingService.get_embedding_dimension()
         return {
             "count": count,
             "name": collection.name,
+            "embedding_dimension": dim,
             "persist_directory": str(CHROMA_DIR),
             "embedding_mode": load_config().get("embedding_mode", "local"),
         }

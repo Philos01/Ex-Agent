@@ -286,6 +286,64 @@
 
 ---
 
+### DeepSeek 配置
+
+#### deepseek_api_key
+
+- **类型**: string
+- **默认值**: ""
+- **说明**: DeepSeek API 密钥。用于调用 DeepSeek 模型。
+
+#### deepseek_base_url
+
+- **类型**: string
+- **默认值**: "https://api.deepseek.com/v1"
+- **说明**: DeepSeek API 服务地址。
+
+#### deepseek_chat_model
+
+- **类型**: string
+- **默认值**: "deepseek-chat"
+- **说明**: DeepSeek 对话模型名称。
+
+#### deepseek_reasoner_model
+
+- **类型**: string
+- **默认值**: "deepseek-reasoner"
+- **说明**: DeepSeek 推理模型名称（用于思考模式）。
+
+**DeepSeek 配置示例**:
+```json
+{
+  "provider": "deepseek",
+  "deepseek_api_key": "sk-xxx",
+  "deepseek_base_url": "https://api.deepseek.com/v1",
+  "deepseek_chat_model": "deepseek-chat",
+  "deepseek_reasoner_model": "deepseek-reasoner"
+}
+```
+
+---
+
+### 图结构检索配置
+
+#### graph_search.enabled
+
+- **类型**: boolean
+- **默认值**: true
+- **说明**: 是否启用图结构知识库检索。启用后上传文档时自动提取实体和关系，查询时可通过「模式设置→图结构检索」开关控制。可在前端实时切换。
+
+**示例**:
+```json
+{
+  "graph_search": {
+    "enabled": true
+  }
+}
+```
+
+---
+
 ### 文档处理配置
 
 #### chunk_size

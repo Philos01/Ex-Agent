@@ -1,11 +1,16 @@
 ---
 name: amap-weather
-description: >
-  Query weather via Amap (高德) Weather API — China's most accurate location-based weather service.
-  Use when user asks about weather in Chinese cities, mentions 高德/amap weather, or needs weather
-  data for China locations. Supports real-time conditions and 4-day forecasts. Requires AMAP_API_KEY
-  env var. Trigger phrases: 天气, weather in Beijing/Shanghai/etc, 高德天气, 今天天气怎么样,
-  明天下雨吗, 未来几天天气.
+description: |
+  Query real-time weather and 4-day forecasts via Amap (高德) Weather API for Chinese cities.
+  
+  Use when: user asks about current weather, temperature, or forecast in any Chinese city. User asks if it will rain/snow tomorrow or in the coming days. User mentions weather-related keywords like 天气, 气温, 下雨, 刮风, 雾霾, 湿度. User asks about outdoor activity feasibility related to weather conditions. User asks about weather in a specific Chinese location by name.
+  
+  Do NOT use when: user asks about weather outside China (Amap only covers Chinese locations). User asks about climate or long-term weather trends (not real-time/forecast data). User asks about non-weather information.
+input_parameters:
+  city:
+    type: string
+    required: true
+    description: Chinese city name extracted from the user's question (e.g., 北京, 上海, 宁波)
 ---
 
 # Amap Weather (高德天气)

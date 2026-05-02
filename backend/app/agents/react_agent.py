@@ -55,7 +55,7 @@ class ReActAgent:
         think_config = ThinkConfig(max_tokens=max_tokens)
         self.think_engine = ThinkEngine(provider=provider, config=think_config)
         self.action_engine = ActionEngine()
-        self.compressor = ObservationCompressor()
+        self.compressor = ObservationCompressor(self.cfg.get("skills", {}))
         self.reflector = Reflector()
         self.scratchpad = MemoryScratchpad()
         self.token_budget = TokenBudgetManager(
@@ -231,9 +231,15 @@ class ReActAgent:
 
                 raw_output = result["output"]
 
+                # 提取 max_results 参数（如果用户指定了）
+                max_results_override = None
+                if result.get("params_used"):
+                    max_results_override = result["params_used"].get('max_results') or result["params_used"].get('count')
+
                 compressed_obs = self.compressor.compress(
                     raw_output,
-                    action_name=action
+                    action_name=action,
+                    max_results_override=max_results_override
                 )
 
                 yield {

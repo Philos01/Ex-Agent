@@ -94,12 +94,16 @@ class ActionEngine:
         tool_name: str,
         params: Dict[str, Any]
     ) -> Dict[str, Any]:
+        """
+        Validate and coerce parameters against the skill's declared input_parameters schema.
+        No per-skill hardcoded defaults — defaults come from the schema only.
+        """
         validated = params.copy() if isinstance(params, dict) else {}
 
         schema = self._get_tool_param_schema(tool_name)
 
         if not schema:
-            return self._apply_fallback_defaults(tool_name, validated)
+            return validated
 
         for param_name, param_schema in schema.items():
             if param_schema.get("required", False) and param_name not in validated:
@@ -159,27 +163,6 @@ class ActionEngine:
         elif target_type == "string":
             return str(value)
         return value
-
-    def _apply_fallback_defaults(
-        self,
-        tool_name: str,
-        params: Dict[str, Any]
-    ) -> Dict[str, Any]:
-        if tool_name == "arxiv-watcher":
-            if "search_query" in params and "query" not in params:
-                params["query"] = params.pop("search_query")
-            if "max_results" in params and "count" not in params:
-                try:
-                    params["count"] = int(params.pop("max_results"))
-                except (ValueError, TypeError):
-                    pass
-            params.setdefault("query", "")
-            params.setdefault("count", 5)
-        elif tool_name == "amap-weather":
-            if "location" in params and "city" not in params:
-                params["city"] = params.pop("location")
-            params.setdefault("city", "宁波")
-        return params
 
     def list_available_tools(self) -> List[str]:
         available = self.skill_manager.list_skills()

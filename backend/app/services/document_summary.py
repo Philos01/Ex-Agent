@@ -183,62 +183,17 @@ class DocumentSummarizer:
             return doc_summary
     
     def _generate_with_openai(self, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """使用OpenAI生成摘要"""
-        try:
-            client = self._get_openai_client()
-            model_name = self.cfg.get("openai_chat_model", "gpt-3.5-turbo")
-            
-            completion = client.chat.completions.create(
-                model=model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=2000,
-                temperature=0.3,
-            )
-            
-            if (
-                completion.choices 
-                and len(completion.choices) > 0 
-                and completion.choices[0].message 
-                and completion.choices[0].message.content
-            ):
-                return completion.choices[0].message.content.strip()
-            return None
-        except Exception as e:
-            logger.error(f"OpenAI 摘要生成失败: {e}")
-            return None
-    
+        return self._call_llm(system_prompt, user_prompt, provider="openai")
+
     def _generate_with_ollama(self, system_prompt: str, user_prompt: str) -> Optional[str]:
-        """使用Ollama生成摘要"""
-        try:
-            endpoint = self.cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/generate"
-            model_name = self.cfg.get("ollama_model", "llama2")
-            
-            prompt = f"{system_prompt}\n\n{user_prompt}"
-            
-            r = requests.post(
-                endpoint,
-                json={
-                    "model": model_name,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": 0.3,
-                        "num_predict": 2000
-                    }
-                },
-                timeout=self.cfg.get("timeouts", {}).get("document_summary", 300)
-                if self.cfg.get("timeouts", {}).get("enabled", True) else None
-            )
-            r.raise_for_status()
-            
-            result = r.json().get("response", "")
-            return result.strip() if result else None
-        except Exception as e:
-            logger.error(f"Ollama 摘要生成失败: {e}")
-            return None
+        return self._call_llm(system_prompt, user_prompt, provider="ollama")
+
+    def _call_llm(self, system_prompt: str, user_prompt: str, provider: str) -> Optional[str]:
+        from app.agents.llm_client import create_llm_client, LLMConfig
+        client = create_llm_client(config=LLMConfig(temperature=0.3, max_tokens=2000))
+        return client.complete(
+            prompt=user_prompt, system_prompt=system_prompt, provider=provider,
+        ) or None
 
 
 # 全局摘要生成器实例

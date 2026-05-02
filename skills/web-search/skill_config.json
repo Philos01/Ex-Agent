@@ -1,0 +1,13 @@
+{
+  "python_param_arg": "--params",
+  "output_json": true,
+  "env_vars": [
+    "GOOGLE_API_KEY",
+    "GOOGLE_SEARCH_ENGINE_ID",
+    "BING_API_KEY"
+  ],
+  "dependencies": [
+    "requests",
+    "beautifulsoup4"
+  ]
+}

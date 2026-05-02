@@ -115,174 +115,25 @@ class ThinkEngine:
                 "raw_output": buffer[:500]
             }
 
+    def _get_llm_client(self):
+        from app.agents.llm_client import create_llm_client, LLMConfig
+        return create_llm_client(
+            provider=self.provider,
+            config=LLMConfig(
+                temperature=self.think_config.temperature,
+                top_p=self.think_config.top_p,
+                max_tokens=self.think_config.max_tokens,
+                enable_thinking=self.think_config.enable_thinking,
+                reasoning_effort=self.think_config.reasoning_effort,
+            ),
+        )
+
     def _call_llm_raw(self, prompt: str, stream: bool = False) -> str:
-        if self.provider == "ollama":
-            return self._call_ollama(prompt)
-        else:
-            return self._call_openai(prompt)
+        return self._get_llm_client().complete(prompt)
 
     def _call_llm_raw_stream(self, prompt: str) -> Generator[str, None, None]:
-        if self.provider == "ollama":
-            yield from self._call_ollama_stream(prompt)
-        else:
-            yield from self._call_openai_stream(prompt)
+        yield from self._get_llm_client().complete_stream(prompt)
 
-    def _call_openai(self, prompt: str) -> str:
-        from openai import OpenAI
-
-        key = self.cfg.get("openai_api_key")
-        base_url = self.cfg.get("openai_base_url")
-
-        client_kwargs = {}
-        if key:
-            client_kwargs["api_key"] = key
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        client_kwargs["timeout"] = 60.0
-
-        client = OpenAI(**client_kwargs)
-
-        completion = client.chat.completions.create(
-            model=self.cfg.get("openai_chat_model", "gpt-3.5-turbo"),
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=self.think_config.max_tokens,
-            temperature=self.think_config.temperature,
-            top_p=self.think_config.top_p
-        )
-
-        if (completion.choices and completion.choices[0].message
-                and completion.choices[0].message.content):
-            return completion.choices[0].message.content.strip()
-        raise ReActAgentError("LLM returned empty response")
-
-    def _call_openai_stream(self, prompt: str) -> Generator[str, None, None]:
-        from openai import OpenAI
-
-        key = self.cfg.get("openai_api_key")
-        base_url = self.cfg.get("openai_base_url")
-
-        client_kwargs = {}
-        if key:
-            client_kwargs["api_key"] = key
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        client_kwargs["timeout"] = 60.0
-
-        client = OpenAI(**client_kwargs)
-
-        stream = client.chat.completions.create(
-            model=self.cfg.get("openai_chat_model", "gpt-3.5-turbo"),
-            messages=[{"role": "user", "content": prompt}],
-            max_tokens=self.think_config.max_tokens,
-            temperature=self.think_config.temperature,
-            top_p=self.think_config.top_p,
-            stream=True
-        )
-
-        for chunk in stream:
-            if (chunk.choices and chunk.choices[0].delta
-                    and chunk.choices[0].delta.content):
-                yield chunk.choices[0].delta.content
-
-    def _call_ollama(self, prompt: str) -> str:
-        try:
-            from ollama import chat
-            OLLAMA_SDK = True
-        except ImportError:
-            OLLAMA_SDK = False
-
-        model = self.cfg.get("ollama_model")
-        timeout = self.cfg.get("timeouts", {}).get("react_agent_subprocess", 60)
-
-        if OLLAMA_SDK:
-            response = chat(
-                model=model,
-                messages=[{'role': 'user', 'content': prompt}],
-                options={
-                    "temperature": self.think_config.temperature,
-                    "top_p": self.think_config.top_p,
-                    "num_predict": self.think_config.max_tokens
-                },
-                stream=False,
-                think=self.think_config.enable_thinking
-            )
-            return response.message.content.strip()
-        else:
-            import requests
-            endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
-            r = requests.post(
-                endpoint,
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": False,
-                    "options": {
-                        "temperature": self.think_config.temperature,
-                        "top_p": self.think_config.top_p,
-                        "num_predict": self.think_config.max_tokens
-                    }
-                },
-                timeout=timeout
-            )
-            r.raise_for_status()
-            return r.json().get("response", "")
-
-    def _call_ollama_stream(self, prompt: str) -> Generator[str, None, None]:
-        try:
-            from ollama import chat
-            OLLAMA_SDK = True
-        except ImportError:
-            OLLAMA_SDK = False
-
-        model = self.cfg.get("ollama_model")
-
-        if OLLAMA_SDK:
-            stream = chat(
-                model=model,
-                messages=[{'role': 'user', 'content': prompt}],
-                options={
-                    "temperature": self.think_config.temperature,
-                    "top_p": self.think_config.top_p,
-                    "num_predict": self.think_config.max_tokens
-                },
-                stream=True,
-                think=self.think_config.enable_thinking
-            )
-            for chunk in stream:
-                content = getattr(chunk.message, 'content', None)
-                if content:
-                    yield content
-        else:
-            import requests
-            import json
-            endpoint = self.cfg.get("ollama_url").rstrip("/") + "/api/generate"
-            timeout = self.cfg.get("timeouts", {}).get("requests_stream", 60)
-            r = requests.post(
-                endpoint,
-                json={
-                    "model": model,
-                    "prompt": prompt,
-                    "stream": True,
-                    "options": {
-                        "temperature": self.think_config.temperature,
-                        "top_p": self.think_config.top_p,
-                        "num_predict": self.think_config.max_tokens
-                    }
-                },
-                stream=True,
-                timeout=timeout
-            )
-            r.raise_for_status()
-            for line in r.iter_lines():
-                if line:
-                    try:
-                        data = json.loads(line.decode('utf-8'))
-                        if data.get("response"):
-                            yield data["response"]
-                        if data.get("done", False):
-                            break
-                    except Exception:
-                        pass
 
     def _is_output_usable(self, output: str) -> bool:
         if not output or len(output.strip()) < 10:

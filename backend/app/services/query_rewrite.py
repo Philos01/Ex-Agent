@@ -80,87 +80,24 @@ class QueryRewriteService:
             return query
     
     def _rewrite_with_openai(self, cfg, system_prompt: str, user_prompt: str, original_query: str) -> str:
-        """使用 OpenAI 风格 API 改写查询"""
-        try:
-            key = cfg.get("openai_api_key")
-            base_url = cfg.get("openai_base_url")
-            
-            client_kwargs = {}
-            if key:
-                client_kwargs["api_key"] = key
-            if base_url:
-                client_kwargs["base_url"] = base_url
-            
-            client = OpenAI(**client_kwargs)
-            
-            completion = client.chat.completions.create(
-                model=cfg.get("openai_chat_model", "gpt-3.5-turbo"),
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                max_tokens=256,
-                temperature=0.7,
-            )
-            
-            if (
-                completion.choices 
-                and len(completion.choices) > 0 
-                and completion.choices[0].message 
-                and completion.choices[0].message.content
-            ):
-                rewritten = completion.choices[0].message.content.strip()
-                logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
-                return rewritten
-            
-            return original_query
-            
-        except Exception as e:
-            logger.error(f"OpenAI 查询改写失败: {e}")
-            return original_query
-    
+        return self._call_llm(system_prompt, user_prompt, original_query, provider="openai")
+
     def _rewrite_with_ollama(self, cfg, system_prompt: str, user_prompt: str, original_query: str) -> str:
-        """使用 Ollama 改写查询"""
-        from ollama import chat  # 确保在需要时才导入 Ollama SDK
+        return self._call_llm(system_prompt, user_prompt, original_query, provider="ollama")
+
+    def _call_llm(self, system_prompt: str, user_prompt: str, original_query: str, provider: str) -> str:
+        from app.agents.llm_client import create_llm_client, LLMConfig
         try:
-            response = chat(
-                              model="qwen3:4b-instruct",  # 可以从配置中获取模型名称
-                              messages=[
-                                            {"role": "system", "content": system_prompt},
-                                            {"role": "user", "content": user_prompt}
-                                        ],
-                              think=cfg.get("enable_thinking", False),
-                              stream=False,
-                            )
-            # endpoint = cfg.get("ollama_url", "http://localhost:11434").rstrip("/") + "/api/chat"
-            # print(f"[DEBUG] Ollama endpoint: {endpoint}")
-            # response = requests.post(
-            #     endpoint,
-            #     json={
-            #         "model": cfg.get("ollama_model", "llama2"),
-            #         "messages": [
-            #             {"role": "system", "content": system_prompt},
-            #             {"role": "user", "content": user_prompt}
-            #         ],
-            #         "think": False, 
-            #         "stream": False,
-            #         "options": {
-            #             "temperature": 0.7
-            #         }
-            #     },
-            #     timeout=30
-            # )
-            # 正确访问 response 对象的属性
-            if hasattr(response, "message") and hasattr(response.message, "content"):
-                rewritten = response.message.content.strip()
-                logger.debug("Rewritten query: %s", rewritten)
+            client = create_llm_client(config=LLMConfig(temperature=0.7, max_tokens=256))
+            rewritten = client.complete(
+                prompt=user_prompt, system_prompt=system_prompt, provider=provider,
+            )
+            if rewritten:
                 logger.info(f"查询改写成功: '{original_query}' -> '{rewritten}'")
                 return rewritten
-            
             return original_query
-            
         except Exception as e:
-            logger.error(f"Ollama 查询改写失败: {e}")
+            logger.error(f"查询改写失败 ({provider}): {e}")
             return original_query
 
 

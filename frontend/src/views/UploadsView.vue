@@ -43,7 +43,15 @@
         <span class="material-symbols-outlined text-3xl md:text-[40px] text-primary">cloud_upload</span>
       </div>
       <h3 class="text-lg md:text-xl font-black text-on-surface mb-2">当前知识库</h3>
-      <p class="text-on-surface-variant max-w-md mx-auto mb-6 md:mb-8 text-sm md:text-base">拖放 PDF、CSV 或 XML 实验报告。Luminary AI 将自动为知识图谱向量化内容。</p>
+      <p class="text-on-surface-variant max-w-md mx-auto mb-4 text-sm md:text-base">拖放 PDF、CSV 或 XML 实验报告。Luminary AI 将自动为知识图谱向量化内容。</p>
+      <a
+        href="/api/graph/view"
+        target="_blank"
+        class="inline-flex items-center gap-2 px-4 py-2 mb-6 md:mb-8 bg-secondary/10 text-secondary rounded-xl font-bold hover:bg-secondary/20 transition-colors text-sm"
+      >
+        <span class="material-symbols-outlined text-lg">account_tree</span>
+        查看知识图谱
+      </a>
       
       <div class="flex flex-col sm:flex-row items-center justify-center gap-3 md:gap-4">
         <input 

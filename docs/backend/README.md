@@ -290,18 +290,11 @@ def get_password_hash(password: str):
 
 ```python
 # backend/app/core/rate_limit.py
-from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+# FastAPI 原生速率限制实现
+from app.core.rate_limit import RateLimiter
 
-login_limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["100 per day", "10 per hour"]
-)
-
-api_limiter = Limiter(
-    key_func=get_remote_address,
-    default_limits=["1000 per day", "100 per hour"]
-)
+login_limiter = RateLimiter(max_requests=10, window_seconds=3600)
+api_limiter = RateLimiter(max_requests=100, window_seconds=3600)
 ```
 
 ### 6. 技能系统

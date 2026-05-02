@@ -1,6 +1,6 @@
 {
   "provider": "deepseek",
-  "embedding_mode": "openai",
+  "embedding_mode": "local",
   "local_embedding_model": "BAAI/bge-small-zh-v1.5",
   "local_model_cache_dir": "",
   "openai_base_url": "https://api.openai-hk.com/v1",

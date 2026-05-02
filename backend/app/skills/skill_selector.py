@@ -1,11 +1,16 @@
 
 """
-Skill Selector - Select skills using LLM based on YAML frontmatter
+Skill Selector - LLM-based skill selection with zero hardcoded rules.
+Decisions are made purely by the LLM reading each skill's self-description.
 """
 import logging
 import json
-import requests
+import hashlib
+import re
+import time
+import threading
 from pathlib import Path
+from typing import Dict, Any, List, Optional, Tuple
 from app.core.config import get_complete_config
 from app.skills.metadata_parser import get_skill_metadata
 from openai import OpenAI
@@ -13,23 +18,71 @@ from openai import OpenAI
 logger = logging.getLogger(__name__)
 
 
+class DecisionCache:
+    """Lightweight cache for skill selection decisions to reduce LLM calls."""
+
+    def __init__(self, ttl_seconds: int = 60):
+        self._cache: Dict[str, Tuple[float, Any]] = {}
+        self._ttl = ttl_seconds
+        self._lock = threading.RLock()
+
+    @staticmethod
+    def _normalize(text: str) -> str:
+        t = re.sub(r'[^\w一-鿿]', '', text.lower())
+        return t
+
+    def _key(self, question: str, provider: str) -> str:
+        raw = f"{self._normalize(question)}|{provider}"
+        return hashlib.md5(raw.encode()).hexdigest()
+
+    def get(self, question: str, provider: str):
+        with self._lock:
+            key = self._key(question, provider)
+            entry = self._cache.get(key)
+            if entry is None:
+                return None
+            ts, value = entry
+            if time.time() - ts > self._ttl:
+                del self._cache[key]
+                return None
+            logger.info("[DecisionCache] Cache hit for question hash=%s", key[:8])
+            return value
+
+    def put(self, question: str, provider: str, result):
+        with self._lock:
+            key = self._key(question, provider)
+            self._cache[key] = (time.time(), result)
+            if len(self._cache) > 500:
+                oldest = min(self._cache.items(), key=lambda x: x[1][0])
+                del self._cache[oldest[0]]
+
+    def invalidate(self):
+        with self._lock:
+            self._cache.clear()
+            logger.info("[DecisionCache] Cache invalidated")
+
+
 class SkillSelector:
     """
-    Skill Selector - Select skills based on LLM and YAML frontmatter
+    LLM-based skill selector with zero hardcoded rules.
+
+    The LLM decides purely by reading each skill's description, which includes
+    "Use when" and "Do NOT use when" guidance. No skill names or trigger keywords
+    are hardcoded in the prompt or in this code.
     """
-    
-    def __init__(self, skills_dir):
+
+    def __init__(self, skills_dir: Path):
         self.skills_dir = skills_dir
-        self._skill_metadata = {}
+        self._skill_metadata: Dict[str, Dict[str, Any]] = {}
         self.cfg = get_complete_config()
+        self._cache = DecisionCache(ttl_seconds=60)
         self._load_all_skill_metadata()
-    
+
     def _load_all_skill_metadata(self):
-        """Load YAML frontmatter from all skill packages"""
         if not self.skills_dir.exists():
-            logger.warning("Skills directory not found: {}".format(self.skills_dir))
+            logger.warning("Skills directory not found: %s", self.skills_dir)
             return
-        
+
         for skill_dir in self.skills_dir.iterdir():
             if skill_dir.is_dir() and not skill_dir.name.startswith('.'):
                 try:
@@ -37,213 +90,180 @@ class SkillSelector:
                     skill_name = metadata["name"]
                     self._skill_metadata[skill_name] = {
                         **metadata,
-                        "dir": skill_dir
+                        "dir": skill_dir,
                     }
-                    logger.info("Loaded skill metadata: {}".format(skill_name))
+                    logger.info("Loaded skill metadata: %s", skill_name)
                 except Exception as e:
-                    logger.error("Failed to load skill metadata from {}: {}".format(skill_dir, e), exc_info=True)
-    
-    def get_available_skills(self):
-        """Get list of all available skill metadata"""
+                    logger.error(
+                        "Failed to load skill metadata from %s: %s", skill_dir, e,
+                        exc_info=True,
+                    )
+
+    def get_available_skills(self) -> List[Dict[str, Any]]:
         return list(self._skill_metadata.values())
-    
-    def _get_openai_client(self):
-        """获取OpenAI客户端实例"""
-        key = self.cfg.get("openai_api_key")
-        base_url = self.cfg.get("openai_base_url")
-        
-        client_kwargs = {}
-        if key:
-            client_kwargs["api_key"] = key
-        if base_url:
-            client_kwargs["base_url"] = base_url
-        
-        return OpenAI(**client_kwargs)
-    
-    def _call_ollama(self, prompt):
-        """调用Ollama模型（非流式）"""
-        from ollama import chat
-        try:
-            model_name = self.cfg.get("ollama_model", "qwen3:4b-instruct")
-            logger.info(f"[SkillSelector-By-LLM] Calling Ollama with model: {model_name}")
-            
-            # 设置 stream=False 确保返回单个 JSON 对象而不是流式响应
-            # r = requests.post(endpoint, json={"model": model_name, "prompt": prompt, "stream": False}, timeout=60)
-            response = chat(
-                              model=model_name,
-                              messages=[{'role': 'user', 'content': prompt}],
-                              think=False,
-                              stream=False,
-                            )
-            return response.message.content.strip()
-            # r.raise_for_status()
-            # return r.json().get("response", "")
-        except Exception as e:
-            logger.error(f"[SkillSelector-By-LLM] Ollama call failed: {str(e)}")
-            raise
-    
-    def _call_openai(self, prompt):
-        """调用OpenAI模型"""
-        client = self._get_openai_client()
-        model_name = self.cfg.get("openai_chat_model", "gpt-3.5-turbo")
-        
-        logger.info(f"[SkillSelector-By-LLM] Calling OpenAI with model: {model_name}")
-        
-        completion = client.chat.completions.create(
-            model=model_name,
-            messages=[
-                {
-                    "role": "system",
-                    "content": "You are a skill selector that outputs only JSON."
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
-            max_tokens=512,
-            temperature=0.1,
-        )
-        
-        if (
-            completion.choices 
-            and len(completion.choices) > 0 
-            and completion.choices[0].message 
-            and completion.choices[0].message.content
-        ):
-            return completion.choices[0].message.content.strip()
-        return ""
-    
-    def select_skill_with_llm(self, question, provider="openai"):
-        """
-        Select skill using LLM
-        
-        Args:
-            question: User question
-            provider: LLM provider ("openai" or "ollama")
-            
-        Returns:
-            (should_use, skill_name, skill_params)
-        """
-        available_skills = self.get_available_skills()
-        
-        if not available_skills:
-            return False, None, None
-        
-        logger.info("[SkillSelector-By-LLM] Selecting skill for question: {}".format(question))
-        
-        # Build skills metadata string for LLM
-        skills_info = []
-        for skill in available_skills:
-            skills_info.append({
-                "name": skill["name"],
-                "description": skill.get("description", ""),
-                "input_parameters": skill.get("input_parameters", {})
-            })
-        
-        prompt = f"""
-# Skill Selection Task
 
-You are a skill selector for an AI assistant. Your task is to analyze the user's question and determine if any of the available skills should be used.
-
-## Available Skills:
-{json.dumps(skills_info, ensure_ascii=False, indent=2)}
-
-## User Question:
-{question}
-
-## Instructions:
-1. Carefully read the user's question
-2. Compare the question with each skill's description
-3. Determine if any skill is appropriate for this question
-4. If a skill is appropriate, extract the necessary parameters from the question
-5. Output your decision in JSON format
-
-## Output JSON Schema:
-{{
-  "should_use_skill": boolean,
-  "skill_name": string | null,
-  "parameters": {{
-    "query": string (for search-related skills),
-    "location": string (for weather-related skills)
-  }}
-}}
-
-## Critical Decision Rules:
-
-### DEFAULT BEHAVIOR: Use Internal RAG Retrieval
-Most questions should be answered using the internal knowledge base (RAG retrieval), NOT by skills.
-Skills are ONLY for external API calls or specialized tools.
-
-### DO NOT Use Any Skill When:
-1. User asks about a specific person's papers/articles (e.g., "有没有钟鑫涛的文章", "张三发表了什么")
-2. User asks about internal/research group documents (e.g., "我们组的论文", "课题组的文章")
-3. User asks "有没有..." or "有没有关于..." WITHOUT mentioning "最新"/"latest"/"最近" — these imply searching local resources
-4. User asks about papers/documents that could reasonably exist in the local knowledge base, AND does NOT use time-sensitive keywords ("最新", "latest", "最近", "新的", "近期", "前沿", "最新进展")
-
-### MUST Use Skills When:
-1. User asks for the LATEST / newest / recent research, papers, or articles (keywords: "最新", "latest", "最近", "新的", "近期", "前沿", "最新进展", "最新的") — local KB cannot provide time-sensitive results, so arxiv-watcher MUST be used
-2. User EXPLICITLY requests external service (e.g., "在ArXiv上搜索", "查一下天气", "搜索文献", "检索论文")
-3. The question requires real-time external data (weather, current events, latest publications)
-4. The skill's description CLEARLY matches the user's intent
-
-## Key Distinction:
-- "有没有关于遥感图像融合的文章" → local RAG (checking existing knowledge)
-- "帮我搜索一下关于光谱超分的最新文章" → arxiv-watcher skill (needs real-time search)
-- "查查遥感方面的论文" → local RAG (ambiguous, default to local)
-- "最新的LLM研究进展" → arxiv-watcher skill (time-sensitive, needs external search)
-- "搜索关于图像分割的最新论文" → arxiv-watcher skill (explicit search + latest = external)
-
-## Important Notes:
-- The keyword "最新" (latest/newest) is a STRONG signal to use arxiv-watcher, because local KB cannot provide up-to-date research
-- "搜索" + "最新" together ALWAYS means use arxiv-watcher
-- "搜索" alone without "最新" → use local RAG
-- When in doubt about time-sensitivity, check if the question asks for "最新" or "latest" — if yes, use skill
-- Extract parameters directly from the question
-- If no skill matches, set "should_use_skill" to false and "skill_name" to null
-- Output only the JSON, no other text
-"""
-        
-        try:
-            # 根据provider选择调用方式
-            if provider == "ollama":
-                response_text = self._call_ollama(prompt)
-            else:
-                response_text = self._call_openai(prompt)
-            logger.debug("[SkillSelector-By-LLM] Using provider: %s", provider)
-            if not response_text:
-                logger.warning("[SkillSelector-By-LLM] Empty LLM response")
-                return False, None, None
-            
-            # Extract JSON from response (in case of extra text)
-            json_start = response_text.find('{')
-            json_end = response_text.rfind('}')
-            if json_start != -1 and json_end != -1:
-                json_str = response_text[json_start:json_end + 1]
-                result = json.loads(json_str)
-                
-                should_use = result.get("should_use_skill", False)
-                skill_name = result.get("skill_name")
-                params = result.get("parameters", {})
-                
-                # Validate skill name exists
-                if should_use and skill_name and skill_name in self._skill_metadata:
-                    logger.info(f"[SkillSelector-By-LLM] Selected skill: {skill_name}, params: {params}")
-                    return should_use, skill_name, params
-                else:
-                    logger.info(f"[SkillSelector-By-LLM] No skill selected or skill not found")
-                    return False, None, None
-            
-            logger.warning("[SkillSelector-By-LLM] Invalid LLM response format")
-            return False, None, None
-            
-        except Exception as e:
-            logger.error(f"[SkillSelector-By-LLM] LLM call failed: {e}", exc_info=True)
-            return False, None, None
-    
-    def get_skill_dir(self, skill_name):
-        """Get skill package directory"""
+    def get_skill_dir(self, skill_name: str) -> Optional[Path]:
         if skill_name in self._skill_metadata:
             return self._skill_metadata[skill_name]["dir"]
         return None
 
+    def invalidate_cache(self):
+        self._cache.invalidate()
+
+    def _call_llm(self, prompt: str, provider: str) -> str:
+        from app.agents.llm_client import create_llm_client
+        client = create_llm_client()
+        return client.complete(
+            prompt=prompt, provider=provider,
+            system_prompt="You are a skill selector. Output only valid JSON.",
+        )
+
+    # ── prompt builder (zero hardcoded rules) ──────────────────────
+
+    def _build_selection_prompt(
+        self,
+        question: str,
+        conversation_history: str = "",
+    ) -> str:
+        """Build a generic skill-selection prompt.  No skill names or trigger
+        keywords are hardcoded — the LLM reads each skill's self-description."""
+        skills_info: List[Dict[str, Any]] = []
+        for skill in self.get_available_skills():
+            skills_info.append({
+                "name": skill["name"],
+                "description": skill.get("description", ""),
+                "input_parameters": skill.get("input_parameters", {}),
+            })
+
+        context_block = ""
+        if conversation_history:
+            context_block = f"""
+## Recent Conversation Context
+{conversation_history}
+
+Use the conversation context to understand follow-up questions.  If the user
+says "那明天呢？" after a weather query, that likely refers to the same
+skill the conversation has been using.
+"""
+
+        return f"""# Skill Selection Task
+
+You are a skill selector for an AI assistant.  Decide whether any of the
+available skills should be invoked to answer the user's question.
+
+## Available Skills
+{json.dumps(skills_info, ensure_ascii=False, indent=2)}
+
+## User Question
+{question}
+{context_block}
+## Instructions
+
+1. Read each skill's **description** carefully — it contains both "Use when"
+   and "Do NOT use when" guidance written by the skill's author.
+2. If a skill's description clearly matches the user's intent, select it.
+3. If **no** skill matches, return should_use_skill: false.
+4. Extract parameters from the question according to the skill's
+   **input_parameters** schema — use the exact parameter names defined there.
+5. If the conversation context suggests a follow-up related to a previously
+   used topic, prefer the skill that matches that topic.
+
+## Output JSON schema
+{{
+  "should_use_skill": boolean,
+  "skill_name": null,
+  "parameters": {{}},
+  "reasoning": "one sentence explaining why you chose or rejected skills"
+}}
+
+Output **only** the JSON, no other text."""
+
+    # ── public API ────────────────────────────────────────────────
+
+    def select_skill_with_llm(
+        self,
+        question: str,
+        provider: str = "openai",
+        conversation_history: str = "",
+        use_cache: bool = True,
+    ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]]]:
+        """
+        Select skill using LLM with zero hardcoded rules.
+
+        Args:
+            question: User question
+            provider: LLM provider ("openai" or "ollama")
+            conversation_history: Optional recent conversation context
+            use_cache: Whether to check/populate the decision cache
+
+        Returns:
+            (should_use, skill_name, params)
+        """
+        available_skills = self.get_available_skills()
+        if not available_skills:
+            return False, None, None
+
+        # cache check
+        if use_cache:
+            cached = self._cache.get(question, provider)
+            if cached is not None:
+                return cached
+
+        logger.info("[SkillSelector] Selecting skill for: %s", question[:80])
+
+        prompt = self._build_selection_prompt(question, conversation_history)
+
+        try:
+            response_text = self._call_llm(prompt, provider)
+
+            if not response_text:
+                logger.warning("[SkillSelector] Empty LLM response")
+                return False, None, None
+
+            result = self._parse_response(response_text)
+            if result is None:
+                return False, None, None
+
+            should_use, skill_name, params = result
+
+            # validate skill exists
+            if should_use and skill_name and skill_name in self._skill_metadata:
+                logger.info(
+                    "[SkillSelector] Selected: %s, params: %s", skill_name, params
+                )
+                if use_cache:
+                    self._cache.put(question, provider, result)
+                return result
+
+            logger.info("[SkillSelector] No skill selected or skill not found")
+            if use_cache:
+                self._cache.put(question, provider, (False, None, None))
+            return False, None, None
+
+        except Exception as e:
+            logger.error("[SkillSelector] LLM call failed: %s", e, exc_info=True)
+            return False, None, None
+
+    def _parse_response(
+        self, response_text: str
+    ) -> Optional[Tuple[bool, Optional[str], Optional[Dict[str, Any]]]]:
+        """Extract JSON decision from LLM response."""
+        json_start = response_text.find("{")
+        json_end = response_text.rfind("}")
+        if json_start == -1 or json_end == -1:
+            logger.warning("[SkillSelector] No JSON found in response")
+            return None
+
+        try:
+            json_str = response_text[json_start : json_end + 1]
+            data = json.loads(json_str)
+            should_use = data.get("should_use_skill", False)
+            skill_name = data.get("skill_name")
+            params = data.get("parameters", {})
+            reasoning = data.get("reasoning", "")
+            if reasoning:
+                logger.info("[SkillSelector] Reasoning: %s", reasoning)
+            return should_use, skill_name, params
+        except json.JSONDecodeError as e:
+            logger.warning("[SkillSelector] Invalid JSON: %s", e)
+            return None

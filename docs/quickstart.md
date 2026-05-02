@@ -158,7 +158,16 @@ python manage_users.py create --username admin --email admin@example.com --passw
 
 ### 切换 LLM 供应商
 
-系统支持 OpenAI 和 Ollama 两种 LLM 供应商。可以通过修改 `config.json` 或在设置页面切换：
+系统支持 OpenAI、DeepSeek 和 Ollama。可通过修改 `config.json` 或前端「模式设置」切换。
+
+**使用 DeepSeek**:
+```json
+{
+  "provider": "deepseek",
+  "deepseek_api_key": "sk-xxx",
+  "deepseek_chat_model": "deepseek-chat"
+}
+```
 
 **使用 Ollama**:
 ```json

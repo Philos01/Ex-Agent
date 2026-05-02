@@ -1,4 +1,5 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
+from fastapi.responses import FileResponse
 from typing import List, Optional
 import os
 import sys
@@ -25,6 +26,20 @@ router = APIRouter(tags=["api"])
 logger = logging.getLogger(__name__)
 
 
+def _format_conversation_history_for_skill(messages: list) -> str:
+    """Format recent messages as context for skill selection."""
+    if not messages:
+        return ""
+    recent = messages[-6:]
+    lines = []
+    for msg in recent:
+        role = msg.get("role", "user") if isinstance(msg, dict) else getattr(msg, "role", "user")
+        content = msg.get("content", "") if isinstance(msg, dict) else getattr(msg, "content", "")
+        label = "用户" if role == "user" else "助手"
+        lines.append(f"{label}: {content[:200]}")
+    return "\n".join(lines)
+
+
 class Message(BaseModel):
     role: str  # "user" 或 "assistant"
     content: str
@@ -43,7 +58,9 @@ class QARequest(BaseModel):
     presence_penalty: float = None
     frequency_penalty: float = None
     enable_thinking: bool = None  # 是否启用思考阶段
+    reasoning_effort: Optional[str] = None  # 思考强度
     use_react: bool = None  # 是否启用 ReAct 多步推理模式
+    use_graph: bool = None  # 是否启用图结构检索
     messages: List[Message] = []  # 对话历史
 
 
@@ -453,7 +470,11 @@ def reset_vector_store():
 async def qa_endpoint(req: QARequest):
     cfg = get_complete_config()
     provider = req.provider if req.provider else cfg.get("provider", "openai")
-    
+
+    # Propagate LLM selection to all downstream calls
+    from app.core.llm_context import set_llm_context
+    set_llm_context(provider=provider)
+
     logger.debug("Received QA request with params:")
     logger.debug("  question: %s...", req.question[:50])
     logger.debug("  top_k: %s", req.top_k)
@@ -493,7 +514,10 @@ async def qa_endpoint(req: QARequest):
             skill_params = None
             logger.debug("Skill '%s' not found, falling back to RAG", skill_name)
     else:
-        use_skill, skill_name, skill_params = skill_manager.should_use_skill(req.question, provider=provider)
+        conv_history = _format_conversation_history_for_skill(req.messages)
+        use_skill, skill_name, skill_params = skill_manager.should_use_skill(
+            req.question, provider=provider, conversation_history=conv_history
+        )
     
     docs = []
     sources = []
@@ -514,6 +538,7 @@ async def qa_endpoint(req: QARequest):
         "frequency_penalty": req.frequency_penalty,
         "enable_thinking": req.enable_thinking,
         "use_react": req.use_react,
+        "use_graph": req.use_graph,
         "messages": [{"role": m.role, "content": m.content} for m in req.messages],
         "use_skill": use_skill,
         "skill_name": skill_name,
@@ -899,3 +924,53 @@ def submit_feedback(req: FeedbackRequest):
     """提交用户反馈"""
     logger.info("Received feedback for message %s: rating=%d, comment=%s", req.message_id, req.rating, req.comment)
     return {"success": True, "message_id": req.message_id}
+
+
+# ── Graph visualization ──────────────────────────────────
+
+@router.get("/graph/view")
+def graph_view():
+    """浏览知识图谱 HTML，不存在时自动生成"""
+    path = "data/knowledge_graph.html"
+    if not os.path.exists(path):
+        from app.services.graph_analysis import GraphAnalyzer
+        analyzer = GraphAnalyzer()
+        analyzer.visualize(output_path=path)
+    return FileResponse(path, media_type="text/html")
+
+
+@router.get("/graph/visualize")
+def graph_visualize(output: str = "data/knowledge_graph.html"):
+    """生成知识图谱的交互式 HTML 可视化"""
+    try:
+        from app.services.graph_analysis import GraphAnalyzer
+        analyzer = GraphAnalyzer()
+        path = analyzer.visualize(output_path=output)
+        return {"success": True, "path": path, "message": "可视化已生成"}
+    except Exception as e:
+        logger.error("Graph visualization failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph/stats")
+def graph_stats():
+    """获取知识图谱统计信息"""
+    try:
+        from app.services.graph_store import get_graph_store
+        store = get_graph_store()
+        return {"success": True, "stats": store.stats()}
+    except Exception as e:
+        logger.error("Graph stats failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/graph/communities")
+def graph_communities():
+    """获取图社区检测结果"""
+    try:
+        from app.services.graph_analysis import GraphAnalyzer
+        analyzer = GraphAnalyzer()
+        return {"success": True, "communities": analyzer.community_detection()}
+    except Exception as e:
+        logger.error("Graph communities failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))

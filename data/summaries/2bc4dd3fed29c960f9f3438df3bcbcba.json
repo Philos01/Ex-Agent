@@ -1,0 +1,49 @@
+{
+  "filename": "研三-钟鑫涛-双向光谱注意力论文-TGRS.md",
+  "summary": "本文针对光谱超分辨率（SSR）中现有深度学习方法在光谱与空间特征提取不平衡及单向光谱建模不足的问题，提出了一种新颖的双向光谱注意力多尺度聚合网络（BiSANet）。该网络通过三个U形分支和双向光谱注意力模块（MSEB和RMSEB）实现前向和反向光谱特征提取，利用权重共享策略增强光谱间依赖建模。同时，独立的空间重建分支（MSAB）及其专用损失函数确保空间细节的精确恢复。重建模块结合了Vision Mamba的全局建模能力和CBAM的光谱-空间自注意力，实现光谱空间信息的自适应融合。实验结果表明，BiSANet在多个基准数据集上优于现有方法，显著提升了重建的峰值信噪比和光谱角映射性能，验证了其在高保真光谱空间重建中的有效性。",
+  "key_topics": [
+    "光谱超分辨率（SSR）",
+    "双向光谱注意力机制",
+    "多尺度特征聚合",
+    "深度学习在高光谱图像重建中的应用",
+    "光谱与空间特征融合"
+  ],
+  "key_points": [
+    "提出BiSANet网络，包含三个U形分支，集成双向光谱注意力模块（MSEB和RMSEB）和独立空间重建分支（MSAB），实现光谱与空间特征的高效提取与融合。",
+    "创新性地引入双向光谱注意力机制，通过正向和反向光谱特征提取及权重共享策略，克服传统单向建模的局限，增强跨波段信息交互。",
+    "设计独立的空间重建分支及专用损失函数，确保空间细节的精确恢复，提升空间信息的多阶段融合效果。",
+    "重建模块结合Vision Mamba的全局建模和CBAM的光谱-空间自注意力，实现光谱空间信息的动态自适应融合。",
+    "在DFC2018 Houston等三个基准数据集上，BiSANet在PSNR提升4.26%和SAM降低11.52%等指标上显著优于现有最先进方法。"
+  ],
+  "main_conclusions": [
+    "BiSANet有效解决了SSR中光谱与空间信息提取不平衡及单向光谱建模不足的问题，实现了高保真度的光谱空间重建。",
+    "双向光谱注意力机制和多尺度空间特征融合显著提升了高光谱图像的重建质量和光谱一致性。",
+    "结合Vision Mamba和CBAM的重建模块增强了光谱空间信息的自适应融合能力，推动了SSR技术的发展。"
+  ],
+  "technical_terms": [
+    "光谱超分辨率（SSR）",
+    "高光谱图像（HSI）",
+    "双向光谱注意力模块（MSEB和RMSEB）",
+    "多尺度空间注意力模块（MSAB）",
+    "U-Net结构",
+    "多头自注意力（Multihead Self-Attention）",
+    "Vision Mamba",
+    "CBAM（Convolutional Block Attention Module）",
+    "峰值信噪比（PSNR）",
+    "光谱角映射（SAM）"
+  ],
+  "authors": [
+    "Xintao Zhong",
+    "Shenfu Zhang",
+    "Liang Chen",
+    "Gang Yang",
+    "Weiwei Sun",
+    "Feng Shao",
+    "Xiangchao Meng"
+  ],
+  "publication_year": "2025",
+  "venue": "IEEE Transactions on Geoscience and Remote Sensing (TGRS)",
+  "quality_score": 0.95,
+  "generated_at": "2026-05-02T08:40:50.543273",
+  "file_path": "data\\uploads\\研三-钟鑫涛-双向光谱注意力论文-TGRS.md"
+}

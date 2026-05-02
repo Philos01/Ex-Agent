@@ -389,4 +389,29 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
     except Exception as e:
         logger.warning("BM25 index refresh failed after ingest: %s", e)
 
+    # ── Graph layer: entity extraction + graph upsert ────
+    if result["success"]:
+        try:
+            from app.services.entity_extractor import EntityExtractor
+            from app.services.graph_store import get_graph_store
+
+            extractor = EntityExtractor(provider=provider)
+            extracted = extractor.extract(text, filename, provider=provider)
+
+            graph = get_graph_store()
+            graph_result = graph.upsert_document(
+                filename=filename,
+                text=text,
+                entities=extracted.get("entities", []),
+                relations=extracted.get("relations", []),
+            )
+            result["graph"] = graph_result
+            logger.info(
+                "Graph layer: %s → %s (%d entities, %d relations)",
+                filename, graph_result["status"],
+                graph_result["entity_count"], graph_result["relation_count"],
+            )
+        except Exception as e:
+            logger.warning("Graph extraction failed (non-fatal): %s", e)
+
     return result

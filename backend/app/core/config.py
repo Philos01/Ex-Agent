@@ -106,6 +106,9 @@ _DEFAULT_CONFIG: Dict = {
     "allow_user_registration": False,
     "allow_pdf_conversion": False,
     "pdf_conversion_method": "marker",
+    "graph_search": {
+        "enabled": True
+    },
     "hybrid_search": {
         "enabled": True,
         "initial_retrieve_count": 20,

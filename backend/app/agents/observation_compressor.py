@@ -13,7 +13,7 @@ class ObservationCompressor:
 
     COMPRESSION_CONFIG = {
         "arxiv_search": {
-            "max_papers_in_scratchpad": 3,
+            "max_papers_in_scratchpad": 5,  # 改为默认 5 篇
             "abstract_max_chars": 150,
             "keep_fields": ["title", "authors", "published", "pdf_url"]
         },
@@ -27,11 +27,20 @@ class ObservationCompressor:
         }
     }
 
+    def __init__(self, config: Optional[Dict[str, Any]] = None):
+        self.config = config or {}
+        # 如果有配置，覆盖默认值
+        if "arxiv_search" in self.config:
+            max_results = self.config["arxiv_search"].get("max_results")
+            if max_results:
+                self.COMPRESSION_CONFIG["arxiv_search"]["max_papers_in_scratchpad"] = max_results
+
     def compress(
         self,
         observation: str,
         obs_type: str = "default",
-        action_name: str = ""
+        action_name: str = "",
+        max_results_override: Optional[int] = None
     ) -> str:
         if not observation:
             return ""
@@ -43,6 +52,11 @@ class ObservationCompressor:
             obs_type,
             self.COMPRESSION_CONFIG["default"]
         )
+
+        # 如果用户指定了 max_results，覆盖默认值
+        if obs_type == "arxiv_search" and max_results_override is not None:
+            config = config.copy()
+            config["max_papers_in_scratchpad"] = max_results_override
 
         if obs_type == "arxiv_search":
             return self._compress_arxiv_result(observation, config)
