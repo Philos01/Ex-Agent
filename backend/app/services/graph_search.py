@@ -36,15 +36,46 @@ class GraphSearcher:
     # ── Entity lookup ─────────────────────────────────────
 
     def entity_lookup(self, question: str) -> List[str]:
-        """Extract entity names from the question using LLM."""
+        """Extract entity names from the question.  LLM first, FTS fallback."""
+        # LLM path
         prompt = ENTITY_LOOKUP_PROMPT.format(question=question)
         try:
             result = self._call_llm(prompt)
             if result:
-                return result.get("entities", [])
+                entities = result.get("entities", [])
+                if entities:
+                    return entities
         except Exception as e:
-            logger.warning("[GraphSearch] Entity lookup failed: %s", e)
-        return []
+            logger.warning("[GraphSearch] Entity lookup LLM failed: %s", e)
+
+        # FTS fallback: match question words against graph node names
+        return self._entity_lookup_fallback(question)
+
+    def _entity_lookup_fallback(self, question: str) -> List[str]:
+        """Extract entity names by matching question substrings via FTS + direct lookup.
+        Uses sliding n-grams (2-8 chars) since Chinese text has no spaces."""
+        clean = question.replace("？", "").replace("?", "").replace("，", "").replace(",", "").strip()
+        entities = []
+        found = set()
+        # Sliding window: try substrings of length 2..8
+        for n in range(min(8, len(clean)), 1, -1):
+            for i in range(len(clean) - n + 1):
+                piece = clean[i:i + n]
+                # Try exact name match first
+                node_id = self._store.get_node_by_name(piece)
+                if node_id and piece not in found:
+                    found.add(piece)
+                    entities.append(piece)
+                    continue
+                # Then FTS
+                matches = self._store.search_nodes(piece, limit=3)
+                for m in matches:
+                    name = m.get("name", "")
+                    if name and name not in found:
+                        found.add(name)
+                        entities.append(name)
+        logger.info("[GraphSearch] FTS fallback found %d entities in question", len(entities))
+        return entities
 
     # ── Graph traversal ───────────────────────────────────
 
@@ -149,10 +180,12 @@ class GraphSearcher:
         # Try to infer the target type from the question
         type_hint = None
         type_keywords = {
-            "人": "作者", "作者": "作者", "方法": "方法", "算法": "方法",
-            "模型": "方法", "数据": "数据集", "数据集": "数据集",
+            "人": "Person", "作者": "Person", "成员": "Person",
+            "方法": "方法", "算法": "方法", "模型": "方法",
+            "数据": "数据集", "数据集": "数据集",
             "指标": "指标", "期刊": "期刊/会议", "概念": "概念",
             "工具": "工具", "议题": "议题", "决策": "决策",
+            "单位": "Organization", "公司": "Organization",
             "模块": "模块", "函数": "函数",
         }
         for kw, t in type_keywords.items():
@@ -162,9 +195,16 @@ class GraphSearcher:
 
         entity_names = self.entity_lookup(question)
         all_entities = []
+        seen = set()
+        paths = []
+
         for ename in entity_names:
-            matches = self._store.search_nodes(ename, type_filter=type_hint, limit=10)
+            matches = self._store.search_nodes(ename, limit=10)  # no type filter — let all types through
             for m in matches:
+                key = (m.get("type"), m.get("name"))
+                if key in seen:
+                    continue
+                seen.add(key)
                 all_entities.append({
                     "type": m.get("type"),
                     "name": m.get("name"),
@@ -172,7 +212,48 @@ class GraphSearcher:
                     "source_doc": m.get("source_doc"),
                 })
 
-        # If no specific entities found, list all of the hinted type
+        # Traverse neighbors for each found entity to collect relationships
+        for entity in list(all_entities):
+            node_id = self._store.get_node_by_name(entity["name"])
+            if not node_id:
+                continue
+            neighbors = self._store.get_neighbors(node_id, max_depth=1)
+            for n in neighbors:
+                nd = n["node"]
+                nkey = (nd.get("type"), nd.get("name"))
+                if nkey not in seen:
+                    seen.add(nkey)
+                    all_entities.append({
+                        "type": nd.get("type"),
+                        "name": nd.get("name"),
+                        "description": nd.get("description"),
+                        "source_doc": nd.get("source_doc"),
+                    })
+                edge = n.get("via_edge", {})
+                if edge:
+                    paths.append({
+                        "from": entity["name"],
+                        "to": nd.get("name"),
+                        "relation": edge.get("type", ""),
+                        "description": edge.get("description", ""),
+                    })
+
+        # If no specific entities found, try FTS on question words
+        if not all_entities:
+            words = question.replace("？", "").replace("?", "").replace("，", " ").replace(",", " ").split()
+            for w in words:
+                if len(w) < 2:
+                    continue
+                matches = self._store.search_nodes(w, type_filter=type_hint, limit=5)
+                for m in matches:
+                    all_entities.append({
+                        "type": m.get("type"),
+                        "name": m.get("name"),
+                        "description": m.get("description"),
+                        "source_doc": m.get("source_doc"),
+                    })
+
+        # Last resort: list all of the hinted type
         if not all_entities and type_hint:
             for nid, data in self._store._graph.nodes(data=True):
                 if data.get("type") == type_hint:
@@ -187,6 +268,7 @@ class GraphSearcher:
             "type": "entity_list",
             "entity_type": type_hint,
             "entities": all_entities,
+            "paths": paths,
         }
 
     # ── Helpers ───────────────────────────────────────────

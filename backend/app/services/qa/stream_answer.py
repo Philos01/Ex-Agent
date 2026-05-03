@@ -58,6 +58,27 @@ def stream_answer(
         )
         return
 
+    # ── 判断是否应该显示引用材料（仅在不使用技能时） ─────────────────
+    def should_show_sources(question, using_skill):
+        # 如果使用技能，不显示 RAG 的 sources
+        if using_skill:
+            return False
+        
+        # 检查是否是自我认知类问题
+        self_identity_keywords = ['你是谁', '你叫什么', '你的名字', '你是', '你能做什么', '你基于什么', '谁开发的', '开发者', '你来自']
+        for keyword in self_identity_keywords:
+            if keyword in question:
+                return False
+        
+        # 检查是否是纯闲聊问题
+        casual_keywords = ['笑话', '故事', '聊天', '你好', '嗨', '哈喽', '早上好', '下午好', '晚上好']
+        is_casual = any(keyword in question for keyword in casual_keywords)
+        
+        if is_casual:
+            return True
+        
+        return True
+
     # ── Skill selection ─────────────────────────────────────
     if use_skill is not None and skill_name is not None:
         should_use_skill_flag = use_skill
@@ -81,6 +102,7 @@ def stream_answer(
     docs = []
     context = ""
     _graph_result = None  # populated by graph search in RAG mode
+    graph_sources = []  # store graph sources for later merging
 
     if should_use_skill_flag and resolved_skill_name and resolved_skill_params:
         logger.info("[QA] Skill mode: %s, skipping RAG retrieval", resolved_skill_name)
@@ -110,59 +132,60 @@ def stream_answer(
             logger.debug("[QA] Skill context length: %d", len(context))
     else:
         logger.info("[QA] RAG mode")
-        summary_config = cfg.get("summary_search", {})
-        use_two_layer = summary_config.get("enabled", False)
-        hybrid_config = cfg.get("hybrid_search", {})
-        use_hybrid = hybrid_config.get("enabled", True)
 
-        # ── Graph-enhanced retrieval ──────────────────
+        # ── Graph-first retrieval ──
         _graph_result = None
         graph_enabled = use_graph if use_graph is not None else cfg.get("graph_search", {}).get("enabled", True)
         if graph_enabled:
             try:
                 from app.services.query_router import QueryRouter
                 router = QueryRouter(provider=provider)
-                classification = router.classify(question)
-                qtype = classification.get("type", "semantic")
-                if qtype in ("entity_list", "relation", "mixed"):
-                    if include_state:
-                        yield {"type": "state", "phase": "retrieving",
-                               "message": "正在图结构中检索实体关系...", "progress": 0}
-                    _graph_result = router.route(question, top_k=top_k)
-                    graph_docs = _graph_result.get("merged_documents", []) if _graph_result else []
-                    if include_state:
-                        yield {"type": "state", "phase": "retrieving",
-                               "message": f"图检索到 {len(graph_docs)} 个关联文档", "progress": 10}
+                _graph_result = router.route(question, top_k=top_k)
             except Exception as e:
                 logger.warning("[QA] Graph search failed (non-fatal): %s", e)
 
+        # ── Text retrieval ──
         if include_state:
-            if use_two_layer:
-                yield {"type": "state", "phase": "retrieving",
-                       "message": "正在使用双层检索系统（先检索摘要）...", "progress": 0}
-            elif use_hybrid:
-                yield {"type": "state", "phase": "retrieving",
-                       "message": "正在使用混合检索系统查找相关文档...", "progress": 0}
-            else:
-                yield {"type": "state", "phase": "retrieving",
-                       "message": "正在连接 Chroma 向量库...", "progress": 0}
+            yield {"type": "state", "phase": "retrieving",
+                   "message": "正在知识库中检索相关文档...", "progress": 0}
 
         docs = retrieve_documents(question, provider, top_k)
+        context = "\n\n".join([d.get("text", "") for d in docs])
+        logger.debug("[QA] RAG text context length: %d", len(context))
 
         if include_state:
             yield {"type": "state", "phase": "retrieving",
-                   "message": f"检索到 {len(docs)} 篇高度相关的文献", "progress": 25}
+                   "message": f"检索到 {len(docs)} 篇相关文献", "progress": 25}
 
-        context = "\n\n".join([d.get("text", "") for d in docs])
-        logger.debug("[QA] RAG context length: %d", len(context))
-
-    # Inject graph search results into context
-    if _graph_result:
-        graph_context = _format_graph_context(_graph_result)
-        if graph_context:
-            context = graph_context + "\n\n" + context if context else graph_context
+        # Merge graph results + fetch full text for graph-identified documents
+        if _graph_result:
+            graph_context = _format_graph_context(_graph_result)
+            # Fetch Chroma-stored text for documents the graph identified
+            doc_text, graph_sources = _fetch_graph_document_text(_graph_result, question, top_k)
+            if doc_text:
+                graph_context = "## 知识图谱检索结果（请优先参考以下结构化信息）\n" + graph_context
+                graph_context += "\n\n## 图谱关联文档的完整内容\n" + doc_text
+            if graph_context:
+                context = graph_context + "\n\n---\n\n## 向量检索结果\n" + context
 
     conversation_history = format_conversation_history(messages)
+
+    # ── 发送合并的 sources 事件给前端 ─────────────────────────────
+    all_sources = []
+    if should_show_sources(question, should_use_skill_flag):
+        # 添加普通检索的 sources
+        if docs:
+            all_sources.extend([d.get("metadata", {}) for d in docs])
+        
+        # 添加图检索的 sources
+        if graph_sources:
+            all_sources.extend(graph_sources)
+        
+        # 发送合并的 sources 事件
+        yield {"type": "sources", "sources": all_sources}
+    else:
+        # 发送空 sources
+        yield {"type": "sources", "sources": []}
 
     # ── Time info ───────────────────────────────────────────
     from zoneinfo import ZoneInfo
@@ -261,6 +284,62 @@ def _format_graph_context(route_result: dict) -> str:
     if len(parts) == 1:
         return ""  # no useful graph results
     return "\n".join(parts)
+
+
+def _fetch_graph_document_text(route_result: dict, question: str, top_k: int):
+    """Fetch actual document text from Chroma for documents the graph identified.
+    Returns (text: str, sources: list)."""
+    filenames = _extract_source_filenames(route_result)
+    if not filenames:
+        return "", []
+    try:
+        from app.services.vector_store import init_collection
+        collection = init_collection()
+        if collection is None:
+            return "", []
+        parts = []
+        sources = []
+        seen_sources = set()
+        for fname in filenames:
+            if fname in seen_sources:
+                continue
+            seen_sources.add(fname)
+            sources.append({"source": fname, "via": "graph"})
+            try:
+                result = collection.get(
+                    where={"source": fname},
+                    include=["documents", "metadatas"],
+                    limit=max(3, top_k),
+                )
+                for chunk, meta in zip(result.get("documents", []),
+                                       result.get("metadatas", [])):
+                    section = meta.get("section_title", "") if meta else ""
+                    header = f"来源: {fname}"
+                    if section:
+                        header += f" (章节: {section})"
+                    parts.append(header + "\n" + chunk[:2000])
+            except Exception:
+                continue
+        return ("\n\n---\n".join(parts) if parts else ""), sources
+    except Exception:
+        return "", []
+
+
+def _extract_source_filenames(route_result: dict) -> list:
+    """Walk graph result and collect all unique source_doc references."""
+    filenames = set()
+    def _walk(obj):
+        if isinstance(obj, dict):
+            src = obj.get("source_doc") or obj.get("filename") or obj.get("source")
+            if src and isinstance(src, str) and not src.startswith("http"):
+                filenames.add(src)
+            for v in obj.values():
+                _walk(v)
+        elif isinstance(obj, list):
+            for item in obj:
+                _walk(item)
+    _walk(route_result)
+    return list(filenames)
 
 
 # ── LLM streaming helpers ──────────────────────────────────
@@ -373,14 +452,18 @@ def _stream_openai_or_deepseek(cfg, provider, prompt, temp, tp, mt, pp, fp, et,
             api_kwargs["presence_penalty"] = pp
             api_kwargs["frequency_penalty"] = fp
 
-        if provider == "deepseek" and et:
-            effort = reasoning_effort or "high"
-            if effort in ("low", "medium"):
-                effort = "high"
-            elif effort == "xhigh":
-                effort = "max"
-            api_kwargs["reasoning_effort"] = effort
-            api_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        if provider == "deepseek":
+            if et:
+                effort = reasoning_effort or "high"
+                if effort in ("low", "medium"):
+                    effort = "high"
+                elif effort == "xhigh":
+                    effort = "max"
+                api_kwargs["reasoning_effort"] = effort
+                api_kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            else:
+                # 明确禁用思考模式，避免默认进入思考
+                api_kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
 
         stream = client.chat.completions.create(**api_kwargs)
 

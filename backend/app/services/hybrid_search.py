@@ -23,6 +23,92 @@ class HybridSearchService:
         self.cfg = load_config()
         self.hybrid_config = self.cfg.get("hybrid_search", {})
     
+    def _search_by_filename_keywords(self, query: str, top_k: int = 3) -> List[Dict]:
+        """
+        额外通过文件名关键词进行搜索：如果查询中有相关关键词，优先把相关文档找出来
+        
+        Args:
+            query: 查询文本
+            top_k: 返回的最大文档数量
+            
+        Returns:
+            搜索结果列表
+        """
+        try:
+            from app.services.vector_store import init_collection
+            collection = init_collection()
+            if not collection:
+                return []
+            
+            # 查询相关关键词
+            keywords = [
+                "通讯录", "名单", "名录", "成员", "组员",
+                "人员", "名单", "联系方式", "联系",
+                "工作单位", "单位", "公司", "企业",
+                "姓名", "名字"
+            ]
+            
+            # 检查查询是否包含这些关键词
+            has_keyword = any(keyword in query for keyword in keywords)
+            if not has_keyword:
+                return []
+            
+            # 获取所有文档元数据
+            all_docs = collection.get(include=["metadatas"])
+            if not all_docs or not all_docs.get("metadatas"):
+                return []
+            
+            # 找到文件名包含相关关键词的文档
+            filename_scores = []
+            seen_filenames = set()
+            
+            for meta in all_docs["metadatas"]:
+                if not meta:
+                    continue
+                filename = meta.get("source", "")
+                if not filename or filename in seen_filenames:
+                    continue
+                
+                # 计算文件名匹配分数
+                score = 0
+                for keyword in keywords:
+                    if keyword in filename:
+                        score += 1
+                
+                # 如果有匹配，添加进去
+                if score > 0:
+                    seen_filenames.add(filename)
+                    filename_scores.append((filename, score))
+            
+            # 按分数排序
+            filename_scores.sort(key=lambda x: x[1], reverse=True)
+            
+            # 获取这些文件的文档 chunks
+            results = []
+            for filename, _ in filename_scores[:top_k]:
+                try:
+                    # 获取该文件的前 3 个 chunks
+                    doc_result = collection.get(
+                        where={"source": filename},
+                        include=["documents", "metadatas"],
+                        limit=3
+                    )
+                    if doc_result and doc_result.get("documents"):
+                        for doc, meta in zip(doc_result["documents"], doc_result["metadatas"]):
+                            results.append({
+                                "text": doc,
+                                "metadata": meta,
+                                "score": 1.0  # 高优先级
+                            })
+                except Exception:
+                    continue
+            
+            logger.info(f"找到 {len(results)} 个文件名匹配的 chunks")
+            return results
+        except Exception as e:
+            logger.error(f"通过文件名搜索失败: {e}")
+            return []
+    
     def search(
         self, 
         query: str, 
@@ -65,13 +151,16 @@ class HybridSearchService:
             return vector_search(query, top_k=hybrid_config.get("final_select_count", 3))
         
         initial_count = initial_count or hybrid_config.get("initial_retrieve_count", 20)
-        final_count = final_count or hybrid_config.get("final_select_count", 3)
+        final_count = final_count or hybrid_config.get("final_select_count", 5)  # 稍微增加最终返回的数量
         bm25_weight = bm25_weight if bm25_weight is not None else hybrid_config.get("bm25_weight", 0.5)
         embedding_weight = embedding_weight if embedding_weight is not None else hybrid_config.get("embedding_weight", 0.5)
         
         logger.info("Hybrid search: query='%s', initial=%d, final=%d", query, initial_count, final_count)
         
-        # 1. 查询改写（除非被明确跳过）
+        # 1. 先进行文件名关键词搜索，找到明显相关的文档
+        filename_matches = self._search_by_filename_keywords(query, top_k=3)
+        
+        # 2. 查询改写（除非被明确跳过）
         if not skip_query_rewrite:
             logger.debug("Rewriting query: '%s'", query)
             query_rewrite_service = get_query_rewrite_service()
@@ -96,17 +185,32 @@ class HybridSearchService:
                 logger.error("传入的查询为空，无法执行混合检索")
                 return []
         
-        # 2. 并行检索 BM2.5 和 向量
+        # 3. 并行检索 BM2.5 和 向量
         with ThreadPoolExecutor(max_workers=2) as executor:
             bm25_future = executor.submit(self._search_bm25, rewritten_query, initial_count)
             vector_future = executor.submit(self._search_vector, rewritten_query, initial_count)
             bm25_docs = bm25_future.result()
             vector_docs = vector_future.result()
         
-        # 3. 融合结果
+        # 4. 融合结果
         fused_docs = self._fuse_results(bm25_docs, vector_docs, bm25_weight, embedding_weight, initial_count)
         
-        # 4. 重排序
+        # 5. 把文件名匹配的结果合并进去，放在前面
+        if filename_matches:
+            logger.info(f"合并 {len(filename_matches)} 个文件名匹配的结果到检索结果中")
+            # 先去重
+            seen_texts = set()
+            unique_filename_matches = []
+            for doc in filename_matches:
+                text = doc.get("text", "")
+                if text not in seen_texts:
+                    seen_texts.add(text)
+                    unique_filename_matches.append(doc)
+            
+            # 把文件名匹配的结果放在最前面
+            fused_docs = unique_filename_matches + fused_docs
+        
+        # 6. 重排序
         rerank_service = get_rerank_service()
         reranked_docs = rerank_service.rerank(rewritten_query, fused_docs, final_count)
         

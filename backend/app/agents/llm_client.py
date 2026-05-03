@@ -159,14 +159,17 @@ class LLMClient:
             **extra,
         )
         prov = self._resolve_provider()
-        if prov == "deepseek" and self.config.enable_thinking:
-            effort = self.config.reasoning_effort
-            kwargs["reasoning_effort"] = (
-                "max" if effort in ("xhigh",)
-                else "high" if effort in ("low", "medium")
-                else effort
-            )
-            kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+        if prov == "deepseek":
+            if self.config.enable_thinking:
+                effort = self.config.reasoning_effort
+                kwargs["reasoning_effort"] = (
+                    "max" if effort in ("xhigh",)
+                    else "high" if effort in ("low", "medium")
+                    else effort
+                )
+                kwargs["extra_body"] = {"thinking": {"type": "enabled"}}
+            else:
+                kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
         elif prov != "ollama":
             kwargs.setdefault("temperature", self.config.temperature)
             kwargs.setdefault("top_p", self.config.top_p)

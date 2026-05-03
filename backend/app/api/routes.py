@@ -519,16 +519,7 @@ async def qa_endpoint(req: QARequest):
             req.question, provider=provider, conversation_history=conv_history
         )
     
-    docs = []
-    sources = []
-
-    # ReAct 模式下，_stream_answer_react 内部会自行检索文档，此处跳过避免重复
-    use_react_mode = req.use_react if req.use_react is not None else False
-    if not use_skill and not use_react_mode:
-        from app.services.qa import _retrieve_documents
-        docs = _retrieve_documents(req.question, provider=provider, top_k=req.top_k)
-        sources = [d.get("metadata", {}) for d in docs]
-    
+    # 让 stream_answer 完全处理检索逻辑，包括图搜索
     generation_params = {
         "top_k": req.top_k,
         "temperature": req.temperature,
@@ -537,6 +528,7 @@ async def qa_endpoint(req: QARequest):
         "presence_penalty": req.presence_penalty,
         "frequency_penalty": req.frequency_penalty,
         "enable_thinking": req.enable_thinking,
+        "reasoning_effort": req.reasoning_effort,
         "use_react": req.use_react,
         "use_graph": req.use_graph,
         "messages": [{"role": m.role, "content": m.content} for m in req.messages],
@@ -545,42 +537,8 @@ async def qa_endpoint(req: QARequest):
         "skill_params": skill_params,
     }
     
-    # 判断是否应该显示引用材料（仅在不使用技能时）
-    def should_show_sources(question, sources_list, using_skill):
-        # 如果使用技能，不显示 RAG 的 sources
-        if using_skill:
-            return False
-        
-        # 如果没有搜索结果，不显示
-        if not sources_list or len(sources_list) == 0:
-            return False
-        
-        # 检查是否是自我认知类问题
-        self_identity_keywords = ['你是谁', '你叫什么', '你的名字', '你是', '你能做什么', '你基于什么', '谁开发的', '开发者', '你来自']
-        for keyword in self_identity_keywords:
-            if keyword in question:
-                return False
-        
-        # 检查是否是纯闲聊问题
-        casual_keywords = ['笑话', '故事', '聊天', '你好', '嗨', '哈喽', '早上好', '下午好', '晚上好']
-        is_casual = any(keyword in question for keyword in casual_keywords)
-        
-        # 如果是闲聊且没有相关搜索结果，不显示
-        if is_casual:
-            # 简单检查搜索结果是否相关（这里简化处理）
-            return True
-        
-        return True
-    
     # 总是使用流式响应，兼容前端期望的格式
     def event_generator():
-        # 只在需要时发送sources（ReAct 模式下不发送 RAG sources）
-        use_react_mode = req.use_react if req.use_react is not None else False
-        if not use_react_mode and should_show_sources(req.question, sources, use_skill):
-            yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
-        else:
-            # 发送空sources
-            yield f"data: {json.dumps({'type': 'sources', 'sources': []})}\n\n"
         # 然后发送answer的stream，包含state事件
         for item in stream_answer(req.question, provider=provider, include_state=True, **generation_params):
             if isinstance(item, dict):
@@ -589,7 +547,7 @@ async def qa_endpoint(req: QARequest):
                 if item_type in ['state', 'skill_result', 'reasoning_chunk',
                                'react_thought', 'react_thought_chunk', 'react_reasoning_chunk',
                                'react_action', 'react_observation', 'react_final_answer',
-                               'react_steps', 'react_error']:
+                               'react_steps', 'react_error', 'graph_sources']:
                     yield f"data: {json.dumps(item)}\n\n"
             else:
                 # 这是一个content事件

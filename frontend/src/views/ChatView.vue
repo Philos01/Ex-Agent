@@ -1028,6 +1028,11 @@ const sendStream = async () => {
             } else if (parsed.type === 'sources') {
               sources = parsed.sources || []
               messages.value[lastIndex].sources = sources
+            } else if (parsed.type === 'graph_sources') {
+              const existing = sources || []
+              const graphNew = parsed.sources || []
+              sources = [...existing, ...graphNew]
+              messages.value[lastIndex].sources = sources
             } else if (parsed.type === 'state') {
               messages.value[lastIndex].thinkingState = {
                 phase: parsed.phase,
