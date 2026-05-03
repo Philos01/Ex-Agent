@@ -1,0 +1,44 @@
+#!/bin/sh
+# 安全检查 pre-commit hook
+# 这个脚本会在每次 git commit 前运行，防止敏感信息泄漏
+#
+# 安装方法：
+# 1. 复制这个文件到 .git/hooks/pre-commit
+# 2. chmod +x .git/hooks/pre-commit
+
+echo "🔍 运行安全检查..."
+
+# 检查 1: 是否有敏感文件被加入提交
+SENSITIVE_FILES=$(git diff --cached --name-only | grep -E "\.(env|config\.json)$")
+if [ -n "$SENSITIVE_FILES" ]; then
+    echo "❌ 错误：发现敏感文件被加入提交！"
+    echo "文件："
+    echo "$SENSITIVE_FILES"
+    echo ""
+    echo "请不要提交这些文件，它们已在 .gitignore 中配置"
+    echo "运行以下命令撤销："
+    echo "  git reset HEAD -- $SENSITIVE_FILES"
+    exit 1
+fi
+
+# 检查 2: 代码中是否有硬编码的 API Key
+if git diff --cached | grep -E "(sk\-|api_key|secret_key|AMAP_API_KEY|OPENAI_API_KEY|DEEPSEEK_API_KEY)"; then
+    echo ""
+    echo "❌ 错误：代码中发现疑似 API Key！"
+    echo "请移除后再提交"
+    exit 1
+fi
+
+# 检查 3: 检查要提交的文件内容
+for FILE in $(git diff --cached --name-only); do
+    # 只检查文本文件
+    if git show ":$FILE" | file - | grep -q "text"; then
+        if git show ":$FILE" | grep -qE "(sk\-[a-zA-Z0-9]{20,}|api_key.*[\"'].*[\"'])"; then
+            echo "❌ 错误：在文件 $FILE 中发现疑似 API Key！"
+            exit 1
+        fi
+    fi
+done
+
+echo "✅ 安全检查通过！"
+exit 0
