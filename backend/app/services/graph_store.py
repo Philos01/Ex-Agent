@@ -113,6 +113,10 @@ class GraphStore:
                     entity_count INTEGER DEFAULT 0,
                     last_indexed_at TEXT DEFAULT (datetime('now'))
                 );
+                CREATE TABLE IF NOT EXISTS metadata (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
                 CREATE VIRTUAL TABLE IF NOT EXISTS nodes_fts USING fts5(
                     name, description
                 );
@@ -135,7 +139,13 @@ class GraphStore:
             self._graph.clear()
             conn = self._get_conn()
             for row in conn.execute("SELECT * FROM nodes"):
-                props = json.loads(row["properties"]) if row["properties"] else {}
+                try:
+                    props = json.loads(row["properties"]) if row["properties"] else {}
+                    if not isinstance(props, dict):
+                        props = {}
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse node properties, using empty dict: {e}")
+                    props = {}
                 self._graph.add_node(
                     row["id"],
                     type=row["type"],
@@ -146,7 +156,13 @@ class GraphStore:
                     created_at=row["created_at"],
                 )
             for row in conn.execute("SELECT * FROM edges"):
-                props = json.loads(row["properties"]) if row["properties"] else {}
+                try:
+                    props = json.loads(row["properties"]) if row["properties"] else {}
+                    if not isinstance(props, dict):
+                        props = {}
+                except (json.JSONDecodeError, TypeError) as e:
+                    logger.warning(f"Failed to parse edge properties, using empty dict: {e}")
+                    props = {}
                 self._graph.add_edge(
                     row["source_id"],
                     row["target_id"],
@@ -343,8 +359,30 @@ class GraphStore:
 
     def _upsert_node(self, node_id, etype, name, description, properties, embedding, source_doc):
         conn = self._get_conn()
-        props_json = json.dumps(properties, ensure_ascii=False)
-        # embedding is already a JSON blob from _compute_embedding_blob
+        # 安全的 properties 序列化
+        try:
+            if not isinstance(properties, dict):
+                properties = {}
+            # 确保 properties 的键值对都是可序列化的
+            safe_props = {}
+            for k, v in properties.items():
+                try:
+                    # 测试序列化
+                    json.dumps({k: v}, ensure_ascii=False)
+                    # 清理键名（去除前后空格）
+                    clean_k = k.strip()
+                    if clean_k:
+                        safe_props[clean_k] = v
+                except (TypeError, ValueError):
+                    # 跳过不可序列化的值
+                    logger.debug(f"Skipping non-serializable property: {k}")
+                    continue
+            props_json = json.dumps(safe_props, ensure_ascii=False)
+        except Exception as e:
+            logger.warning(f"Failed to serialize properties, using empty dict: {e}")
+            props_json = "{}"
+            safe_props = {}
+            
         conn.execute(
             """INSERT OR REPLACE INTO nodes (id, type, name, description, properties, embedding, source_doc)
                VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -352,19 +390,41 @@ class GraphStore:
         )
         self._graph.add_node(
             node_id, type=etype, name=name, description=description,
-            properties=properties, source_doc=source_doc,
+            properties=safe_props, source_doc=source_doc,
         )
 
     def _update_node_properties(self, node_id, new_props):
         if not new_props:
             return
         existing = self._graph.nodes[node_id].get("properties", {})
-        existing.update(new_props)
-        conn = self._get_conn()
-        conn.execute(
-            "UPDATE nodes SET properties=? WHERE id=?",
-            (json.dumps(existing, ensure_ascii=False), node_id),
-        )
+        
+        # 安全地合并属性
+        try:
+            if not isinstance(new_props, dict):
+                new_props = {}
+            # 合并并清理
+            merged = {}
+            merged.update(existing)
+            for k, v in new_props.items():
+                try:
+                    # 测试序列化
+                    json.dumps({k: v}, ensure_ascii=False)
+                    # 清理键名
+                    clean_k = k.strip()
+                    if clean_k:
+                        merged[clean_k] = v
+                except (TypeError, ValueError):
+                    logger.debug(f"Skipping non-serializable property in update: {k}")
+                    continue
+            
+            self._graph.nodes[node_id]["properties"] = merged
+            conn = self._get_conn()
+            conn.execute(
+                "UPDATE nodes SET properties=? WHERE id=?",
+                (json.dumps(merged, ensure_ascii=False), node_id),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to update node properties: {e}")
 
     def _upsert_edge(self, source, target, etype, description, weight=1.0):
         conn = self._get_conn()
@@ -423,6 +483,21 @@ class GraphStore:
 
     # ── Versioning ────────────────────────────────────────
 
+    def get_extractor_version(self) -> str:
+        conn = self._get_conn()
+        row = conn.execute(
+            "SELECT value FROM metadata WHERE key='extractor_version'"
+        ).fetchone()
+        return row["value"] if row else "0.0.0"
+
+    def set_extractor_version(self, version: str):
+        conn = self._get_conn()
+        conn.execute(
+            "INSERT OR REPLACE INTO metadata (key, value) VALUES ('extractor_version', ?)",
+            (version,),
+        )
+        conn.commit()
+
     def _get_doc_version(self, filename: str) -> Optional[Dict]:
         conn = self._get_conn()
         row = conn.execute(
@@ -437,6 +512,45 @@ class GraphStore:
             (filename, content_hash, entity_count, datetime.now(timezone.utc).isoformat()),
         )
         self._get_conn().commit()
+
+    def check_and_update_stale_documents(self) -> List[str]:
+        from app.services.entity_extractor import EXTRACTOR_VERSION
+
+        stored_version = self.get_extractor_version()
+        if stored_version == EXTRACTOR_VERSION:
+            return []
+
+        conn = self._get_conn()
+        rows = conn.execute("SELECT filename FROM doc_versions").fetchall()
+        stale_docs = [row["filename"] for row in rows]
+
+        self.set_extractor_version(EXTRACTOR_VERSION)
+        logger.info(
+            "[GraphStore] Extractor version changed: %s -> %s, %d documents need re-extraction",
+            stored_version,
+            EXTRACTOR_VERSION,
+            len(stale_docs),
+        )
+        return stale_docs
+
+    def update_document_entities(self, filename: str, text: str) -> Dict[str, Any]:
+        from app.services.entity_extractor import EntityExtractor, EXTRACTOR_VERSION
+
+        extractor = EntityExtractor()
+        result = extractor.extract(text, filename)
+        entities = result.get("entities", [])
+        relations = result.get("relations", [])
+
+        upsert_result = self.upsert_document(filename, text, entities, relations)
+        self.set_extractor_version(EXTRACTOR_VERSION)
+
+        logger.info(
+            "[GraphStore] Re-extracted entities for %s: %d entities, %d relations",
+            filename,
+            len(entities),
+            len(relations),
+        )
+        return upsert_result
 
     # ── FTS ───────────────────────────────────────────────
 
@@ -576,6 +690,41 @@ class GraphStore:
             return steps
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             return None
+
+    def get_entities_by_document(self, filename: str) -> List[Dict]:
+        doc_node_id = self._make_node_id(filename)
+        if doc_node_id not in self._graph:
+            return []
+        entities = []
+        for _, neighbor_id, edge_data in self._graph.out_edges(doc_node_id, data=True):
+            if edge_data.get("type") == "CONTAINS":
+                node_data = self._graph.nodes[neighbor_id]
+                entities.append({
+                    "name": node_data.get("name", ""),
+                    "type": node_data.get("type", ""),
+                    "description": node_data.get("description", ""),
+                    "properties": node_data.get("properties", {}),
+                })
+        return entities
+
+    def find_direct_relation(self, entity1_name: str, entity2_name: str) -> Optional[Dict[str, str]]:
+        node1_id = self.get_node_by_name(entity1_name)
+        node2_id = self.get_node_by_name(entity2_name)
+        if not node1_id or not node2_id:
+            return None
+        if self._graph.has_edge(node1_id, node2_id):
+            edge_data = self._graph.edges[node1_id, node2_id]
+            return {
+                "relation": edge_data.get("type", "RELATED_TO"),
+                "description": edge_data.get("description", ""),
+            }
+        if self._graph.has_edge(node2_id, node1_id):
+            edge_data = self._graph.edges[node2_id, node1_id]
+            return {
+                "relation": edge_data.get("type", "RELATED_TO"),
+                "description": edge_data.get("description", ""),
+            }
+        return None
 
     def related_documents(self, doc_name: str, max_depth: int = 2) -> List[Dict]:
         """Find documents related to the given document via shared entities."""

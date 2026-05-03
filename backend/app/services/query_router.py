@@ -3,7 +3,8 @@ Query Router — classify user questions and route to the right search strategy.
 """
 import json
 import logging
-from typing import Dict, Any, Optional
+import re
+from typing import Dict, Any, Optional, List
 
 from app.core.config import get_complete_config
 from app.services.graph_store import get_graph_store
@@ -33,6 +34,68 @@ Output JSON:
 }}
 
 Output ONLY the JSON."""
+
+
+def extract_entities_from_question(question: str) -> List[str]:
+    tokens = re.split(r'[\s，。？！,.\?!]', question)
+    return [t for t in tokens if t]
+
+
+def format_route_result(question: str, graph_store, router_result: Dict) -> Dict:
+    route = router_result.get("route", "semantic")
+    merged_documents = router_result.get("merged_documents", [])
+    if not merged_documents:
+        merged_documents = router_result.get("documents", [])
+
+    related_entities = []
+    seen_entity_names = set()
+
+    for doc in merged_documents:
+        filename = doc.get("filename", "") or doc.get("source", "")
+        if not filename:
+            continue
+        entities = graph_store.get_entities_by_document(filename)
+        for entity in entities:
+            name = entity.get("name")
+            if name and name not in seen_entity_names:
+                seen_entity_names.add(name)
+                related_entities.append(entity)
+
+    paths = []
+    seen_path_keys = set()
+
+    entities_from_question = extract_entities_from_question(question)
+    entities_from_question.extend([e.get("name") for e in related_entities if e.get("name")])
+
+    for entity1 in entities_from_question:
+        for entity2 in entities_from_question:
+            if entity1 != entity2:
+                path = graph_store.find_direct_relation(entity1, entity2)
+                if path:
+                    key = f"{entity1}-{path.get('relation')}-{entity2}"
+                    key_rev = f"{entity2}-{path.get('relation')}-{entity1}"
+                    if key not in seen_path_keys and key_rev not in seen_path_keys:
+                        seen_path_keys.add(key)
+                        paths.append({
+                            "from": entity1,
+                            "relation": path.get("relation", ""),
+                            "to": entity2,
+                            "description": path.get("description", "")
+                        })
+
+    existing_paths = router_result.get("paths", [])
+    for p in existing_paths:
+        key = f"{p.get('from')}-{p.get('relation')}-{p.get('to')}"
+        if key not in seen_path_keys:
+            seen_path_keys.add(key)
+            paths.append(p)
+
+    return {
+        "route": route,
+        "related_entities": related_entities,
+        "merged_documents": merged_documents,
+        "paths": paths
+    }
 
 
 class QueryRouter:

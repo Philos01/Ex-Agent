@@ -341,11 +341,24 @@ async def upload_files(files: List[UploadFile] = File(...)):
             # 继续处理下一个文件，不中断整个流程
             continue
     
+    # 自动更新知识图谱可视化（如果有成功处理的文件）
+    graph_updated = False
+    if saved:
+        try:
+            from app.services.graph_analysis import GraphAnalyzer
+            analyzer = GraphAnalyzer()
+            analyzer.visualize(output_path="data/knowledge_graph.html")
+            graph_updated = True
+            logger.info("知识图谱可视化已自动更新")
+        except Exception as e:
+            logger.warning("自动更新知识图谱可视化失败（非致命）: %s", e)
+    
     # 返回结果，包含成功和失败的信息
     return {
         "status": "ok",
         "files": saved,
         "failed": failed,
+        "graph_updated": graph_updated,
         "message": f"成功处理 {len(saved)} 个文件，失败 {len(failed)} 个文件"
     }
 
@@ -887,10 +900,13 @@ def submit_feedback(req: FeedbackRequest):
 # ── Graph visualization ──────────────────────────────────
 
 @router.get("/graph/view")
-def graph_view():
-    """浏览知识图谱 HTML，不存在时自动生成"""
+def graph_view(force: bool = False):
+    """浏览知识图谱 HTML，不存在时自动生成
+    Args:
+        force: 是否强制重新生成（用于新上传文档后）
+    """
     path = "data/knowledge_graph.html"
-    if not os.path.exists(path):
+    if force or not os.path.exists(path):
         from app.services.graph_analysis import GraphAnalyzer
         analyzer = GraphAnalyzer()
         analyzer.visualize(output_path=path)

@@ -390,14 +390,20 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
         logger.warning("BM25 index refresh failed after ingest: %s", e)
 
     # ── Graph layer: entity extraction + graph upsert ────
+    logger.info(f"[Graph] Starting graph extraction for {filename}, result.success={result['success']}")
     if result["success"]:
         try:
+            logger.info(f"[Graph] Importing entity extractor and graph store...")
             from app.services.entity_extractor import EntityExtractor
             from app.services.graph_store import get_graph_store
 
+            logger.info(f"[Graph] Extracting entities from {filename}...")
             extractor = EntityExtractor(provider=provider)
             extracted = extractor.extract(text, filename, provider=provider)
+            
+            logger.info(f"[Graph] Extracted {len(extracted.get('entities', []))} entities, {len(extracted.get('relations', []))} relations")
 
+            logger.info(f"[Graph] Upserting to graph store...")
             graph = get_graph_store()
             graph_result = graph.upsert_document(
                 filename=filename,
@@ -411,7 +417,10 @@ def ingest_file(path: str, provider: str = "openai", generate_summary: bool = Tr
                 filename, graph_result["status"],
                 graph_result["entity_count"], graph_result["relation_count"],
             )
+            logger.info(f"[Graph] Graph extraction COMPLETED for {filename}")
         except Exception as e:
-            logger.warning("Graph extraction failed (non-fatal): %s", e)
+            logger.error("Graph extraction failed (non-fatal): %s", e, exc_info=True)
+    else:
+        logger.warning(f"[Graph] Skipping graph extraction because result.success=False for {filename}")
 
     return result

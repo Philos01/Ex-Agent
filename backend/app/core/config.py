@@ -107,7 +107,9 @@ _DEFAULT_CONFIG: Dict = {
     "allow_pdf_conversion": False,
     "pdf_conversion_method": "marker",
     "graph_search": {
-        "enabled": True
+        "enabled": True,
+        "enable_llm_judge": True,
+        "fallback_to_parent": True
     },
     "hybrid_search": {
         "enabled": True,

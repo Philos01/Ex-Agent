@@ -17,6 +17,10 @@ from app.services.qa.kb_overview import build_knowledge_base_overview
 from app.services.qa.prompts import build_rag_prompt, build_skill_prompt
 from app.services.qa.retrieval import retrieve_documents
 from app.services.qa.react_stream import stream_answer_react
+from app.services.graph_store import GraphStore, get_graph_store
+from app.services.query_router import format_route_result
+from app.services.graph_retrieval_judge import judge_graph_sufficiency
+from app.services.parent_retriever import get_parent_retriever
 
 try:
     from ollama import chat as ollama_chat
@@ -119,6 +123,7 @@ def stream_answer(
             resolved_skill_name = None
             docs = retrieve_documents(question, provider, top_k)
             context = "\n\n".join([d.get("text", "") for d in docs])
+            focus_prompt = ""
             if include_state:
                 yield {"type": "state", "phase": "retrieving",
                        "message": "技能执行失败，已降级到知识库检索...", "progress": 25}
@@ -129,6 +134,7 @@ def stream_answer(
                 yield {"type": "state", "phase": "skill_call",
                        "message": f"{resolved_skill_name} 技能执行完成", "progress": 40}
             context = f"## 技能执行结果\n{skill_result_text}"
+            focus_prompt = ""
             logger.debug("[QA] Skill context length: %d", len(context))
     else:
         logger.info("[QA] RAG mode")
@@ -141,8 +147,44 @@ def stream_answer(
                 from app.services.query_router import QueryRouter
                 router = QueryRouter(provider=provider)
                 _graph_result = router.route(question, top_k=top_k)
+                if _graph_result:
+                    graph_store = get_graph_store()
+                    _graph_result = format_route_result(question, graph_store, _graph_result)
             except Exception as e:
                 logger.warning("[QA] Graph search failed (non-fatal): %s", e)
+
+        _graph_context = ""
+        _use_parent = False
+        _parent_suggestions = {}
+
+        if _graph_result:
+            cfg = get_complete_config()
+            graph_cfg = cfg.get("graph_search", {})
+            enable_llm_judge = graph_cfg.get("enable_llm_judge", True)
+            fallback_to_parent = graph_cfg.get("fallback_to_parent", True)
+
+            if enable_llm_judge:
+                judge_result = judge_graph_sufficiency(question, _graph_result)
+
+                if judge_result["sufficient"]:
+                    _graph_context = _format_graph_context(_graph_result)
+                    logger.info("[QA] Graph sufficient, using graph only")
+                else:
+                    _use_parent = True
+                    _parent_suggestions = judge_result["suggestions"]
+                    _graph_context = _format_graph_context(_graph_result)
+                    logger.info("[QA] Graph insufficient, using parent retrieval with clues")
+            else:
+                _graph_context = _format_graph_context(_graph_result)
+                if fallback_to_parent:
+                    _use_parent = True
+                    _parent_suggestions = {
+                        "target_documents": [d.get("filename", d.get("source", "")) for d in _graph_result.get("merged_documents", [])],
+                        "focus_entities": [e.get("name", "") for e in _graph_result.get("related_entities", [])],
+                        "search_angle": "",
+                        "query_hint": question
+                    }
+                    logger.info("[QA] LLM judge disabled, fallback to parent retrieval")
 
         # ── Text retrieval ──
         if include_state:
@@ -157,16 +199,27 @@ def stream_answer(
             yield {"type": "state", "phase": "retrieving",
                    "message": f"检索到 {len(docs)} 篇相关文献", "progress": 25}
 
-        # Merge graph results + fetch full text for graph-identified documents
-        if _graph_result:
-            graph_context = _format_graph_context(_graph_result)
-            # Fetch Chroma-stored text for documents the graph identified
-            doc_text, graph_sources = _fetch_graph_document_text(_graph_result, question, top_k)
-            if doc_text:
-                graph_context = "## 知识图谱检索结果（请优先参考以下结构化信息）\n" + graph_context
-                graph_context += "\n\n## 图谱关联文档的完整内容\n" + doc_text
-            if graph_context:
-                context = graph_context + "\n\n---\n\n## 向量检索结果\n" + context
+        focus_prompt = ""
+
+        if _use_parent:
+            parent_retriever = get_parent_retriever()
+            parent_docs = parent_retriever.retrieve_with_clues(question, _parent_suggestions)
+            parent_context = _format_parent_documents(parent_docs)
+            context = _graph_context + "\n\n---\n\n" + parent_context
+
+            focus_entities = _parent_suggestions.get("focus_entities", [])
+            search_angle = _parent_suggestions.get("search_angle", "")
+
+            focus_prompt_parts = []
+            if focus_entities:
+                focus_prompt_parts.append(f"请重点关注以下实体：{', '.join(focus_entities)}")
+            if search_angle:
+                focus_prompt_parts.append(f"请侧重以下角度回答：{search_angle}")
+
+            if focus_prompt_parts:
+                focus_prompt = "\n\n" + "\n".join(focus_prompt_parts)
+        elif _graph_context:
+            context = _graph_context + "\n\n---\n\n" + context
 
     conversation_history = format_conversation_history(messages)
 
@@ -195,6 +248,9 @@ def stream_answer(
     current_year = current_datetime.year
 
     # ── Prompt building ─────────────────────────────────────
+    if focus_prompt:
+        context = context + focus_prompt
+
     if should_use_skill_flag and resolved_skill_name:
         prompt = build_skill_prompt(
             question=question,
@@ -265,7 +321,19 @@ def _format_graph_context(route_result: dict) -> str:
 
     entities = route_result.get("related_entities", [])
     if entities:
-        parts.append(f"### 关联实体: {', '.join(entities[:15])}")
+        ent_parts = []
+        for ent in entities[:15]:
+            if isinstance(ent, dict):
+                name = ent.get("name", str(ent))
+                props = ent.get("properties", {})
+                if props:
+                    prop_str = ", ".join(f"{k}: {v}" for k, v in props.items() if v)
+                    ent_parts.append(f"{name} ({prop_str})" if prop_str else name)
+                else:
+                    ent_parts.append(name)
+            else:
+                ent_parts.append(str(ent))
+        parts.append(f"### 关联实体: {', '.join(ent_parts)}")
 
     merged = route_result.get("merged_documents", [])
     if merged:
@@ -286,9 +354,16 @@ def _format_graph_context(route_result: dict) -> str:
     return "\n".join(parts)
 
 
+def _format_parent_documents(parent_docs: List[Dict]) -> str:
+    parts = []
+    for doc in parent_docs:
+        source_name = doc.get("source", doc.get("filename", "未知文档"))
+        content = doc.get("text", doc.get("content", ""))
+        parts.append(f"[{source_name}]\n{content}")
+    return "\n\n---\n\n".join(parts)
+
+
 def _fetch_graph_document_text(route_result: dict, question: str, top_k: int):
-    """Fetch actual document text from Chroma for documents the graph identified.
-    Returns (text: str, sources: list)."""
     filenames = _extract_source_filenames(route_result)
     if not filenames:
         return "", []
@@ -326,7 +401,6 @@ def _fetch_graph_document_text(route_result: dict, question: str, top_k: int):
 
 
 def _extract_source_filenames(route_result: dict) -> list:
-    """Walk graph result and collect all unique source_doc references."""
     filenames = set()
     def _walk(obj):
         if isinstance(obj, dict):

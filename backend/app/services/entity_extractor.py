@@ -14,41 +14,56 @@ from app.core.config import get_complete_config
 
 logger = logging.getLogger(__name__)
 
+EXTRACTOR_VERSION = "1.1.0"
 
-ENTITY_EXTRACTION_PROMPT = """You are a knowledge graph entity extractor. Read the document below
-and identify the key entities and their relationships.
+ENTITY_EXTRACTION_PROMPT = """你是一个知识图谱实体提取器。
 
-# Rules
-1. Entities can be ANY type — people, concepts, methods, tools, events,
-   data, locations, time points, metrics, decisions, risks, tasks, code modules,
-   datasets, venues, organizations...  Decide the type based on content.
-   Do NOT force content into a fixed set of types.
-2. For each entity provide:
-   - type: the category YOU decide is appropriate
-   - name: a concise, unique name for this entity
-   - description: one sentence describing what it is
-3. Relationships describe connections between entities:
-   - source: entity name
-   - target: entity name
-   - type: the relationship category YOU decide
-   - description: one sentence explaining the relationship
-4. Extract ALL meaningful entities and relationships. Be thorough.
-5. Prefer specific names (e.g. "PANet" not "a neural network method").
+# 核心原则
+1. 图数据库只存储：
+   - 明确的事实（"张三在宁波拓普工作"）
+   - 实体间的直接关系（"张三-工作单位-宁波拓普"）
+2. 需要推理、需要详细解释的内容，不提取关系，留待父子检索处理
 
-# Document
-{text}
+# 提取规则
+1. 实体类型：
+   - 人物：人名、昵称
+   - 组织：公司、学校、机构、实验室
+   - 概念：方法、模型、技术、指标、数据集
+   - 文档：论文、报告、笔记、代码文件
+   - 其他：根据内容决定
 
-# Output JSON schema
-{{
+2. 关系类型：
+   - 仅提取明确、直接的关系
+   - 例如："工作单位"、"毕业于"、"使用"、"包含"
+   - 不确定的关系不提取
+
+3. 对于每个实体：
+   - type：实体类型
+   - name：简洁唯一的名称
+   - description：一句话描述
+   - properties：结构化属性（如果有），必须是标准JSON对象，例如：
+     - 人物实体：{"职位": "工程师", "学校": "清华大学"}
+     - 组织实体：{"位置": "宁波", "类型": "公司"}
+     - 文档实体：{"作者": "张三", "年份": "2025"}
+
+# 文档
+$text
+
+# 输出 JSON 格式
+{
   "entities": [
-    {{"type": "你决定的类型", "name": "实体名", "description": "一句话描述"}}
+    { "type": "类型", "name": "名称", "description": "描述", "properties": { "可选属性": "值" } }
   ],
   "relations": [
-    {{"source": "实体A", "target": "实体B", "type": "你决定的类型", "description": "关系说明"}}
+    { "source": "实体A", "target": "实体B", "type": "关系类型", "description": "关系说明" }
   ]
-}}
+}
 
-Output ONLY the JSON, no other text."""
+⚠️ 重要：
+- properties 必须是标准 JSON 对象，键名不能包含空格或特殊字符
+- 所有字符串必须用双引号包围
+- 只输出 JSON，不要其他文本、说明或markdown格式
+- 如果没有实体或关系，返回空数组"""
 
 
 class EntityExtractor:
@@ -92,18 +107,22 @@ class EntityExtractor:
         rule_entities = self._extract_from_filename(filename)
 
         # Phase 2: LLM extraction
-        prompt = ENTITY_EXTRACTION_PROMPT.format(text=text[:8000])
+        from string import Template
+        prompt_template = Template(ENTITY_EXTRACTION_PROMPT)
+        prompt = prompt_template.safe_substitute(text=text[:8000])
         llm_result = self._call_llm(prompt, prov)
 
         if not llm_result:
-            # LLM failed, use rule-based results only
             result = {"entities": rule_entities, "relations": []}
         else:
-            # Merge rule-based + LLM results (rule-based as ground truth)
             llm_entities = llm_result.get("entities", [])
             llm_relations = llm_result.get("relations", [])
             merged_entities = self._merge_entities(rule_entities, llm_entities)
             result = {"entities": merged_entities, "relations": llm_relations}
+
+        for entity in result["entities"]:
+            if "properties" not in entity:
+                entity["properties"] = {}
 
         if len(self._cache_order) >= self._cache_max:
             old = self._cache_order.pop(0)
@@ -157,23 +176,76 @@ class EntityExtractor:
     def _merge_entities(
         self, rule_entities: List[Dict], llm_entities: List[Dict]
     ) -> List[Dict]:
-        """Merge rule-based entities with LLM entities, avoiding duplicates."""
         merged = list(rule_entities)
         rule_names = {e["name"].lower() for e in rule_entities}
         for ent in llm_entities:
             name = ent.get("name", "").strip()
             if name and name.lower() not in rule_names:
+                if "properties" not in ent:
+                    ent["properties"] = {}
                 merged.append(ent)
                 rule_names.add(name.lower())
+            elif name and name.lower() in rule_names:
+                for existing in merged:
+                    if existing["name"].lower() == name.lower():
+                        existing_props = existing.get("properties", {})
+                        new_props = ent.get("properties", {})
+                        existing["properties"] = {**new_props, **existing_props}
+                        break
+        for entity in merged:
+            if "properties" not in entity:
+                entity["properties"] = {}
         return merged
 
     def _call_llm(self, prompt: str, provider: str) -> Optional[Dict]:
         from app.agents.llm_client import create_llm_client
         client = create_llm_client()
-        return client.complete_json(
-            prompt=prompt, provider=provider,
-            system_prompt="You are a knowledge graph entity extractor. Output only valid JSON.",
-        )
+        try:
+            result = client.complete_json(
+                prompt=prompt, provider=provider,
+                system_prompt="You are a knowledge graph entity extractor. Output only valid JSON.",
+            )
+            # 验证和清理结果
+            if result:
+                # 确保 entities 是列表
+                entities = result.get("entities", [])
+                if not isinstance(entities, list):
+                    entities = []
+                # 清理每个实体
+                for i, ent in enumerate(entities):
+                    if not isinstance(ent, dict):
+                        ent = {}
+                    # 确保 properties 是字典
+                    if "properties" not in ent or not isinstance(ent["properties"], dict):
+                        ent["properties"] = {}
+                    else:
+                        # 清理 properties 的键名（去除前后空格）
+                        clean_props = {}
+                        for k, v in ent["properties"].items():
+                            clean_k = k.strip()
+                            if clean_k:
+                                clean_props[clean_k] = v
+                        ent["properties"] = clean_props
+                    # 确保 name 存在
+                    if "name" not in ent:
+                        ent["name"] = ""
+                    # 清理 name 和 description
+                    ent["name"] = ent.get("name", "").strip()
+                    ent["description"] = ent.get("description", "").strip()
+                    entities[i] = ent
+                result["entities"] = entities
+                
+                # 确保 relations 是列表
+                relations = result.get("relations", [])
+                if not isinstance(relations, list):
+                    relations = []
+                result["relations"] = relations
+                
+                return result
+            return None
+        except Exception as e:
+            logger.warning(f"LLM extraction failed, falling back: {e}")
+            return {"entities": [], "relations": []}
 
     def clear_cache(self):
         self._cache.clear()
