@@ -8,7 +8,7 @@ venv/
 .env
 .env.local
 .env.*.local
-.env.example
+# 保留 .env.example 作为模板文件
 
 # Backend data and config
 backend/data/
@@ -39,3 +39,36 @@ logs/
 *.temp
 # Added by code-review-graph
 .code-review-graph/
+
+# ⚠️ 安全：额外的敏感文件保护
+# 避免意外提交包含密钥的文件
+*.key
+*.pem
+*.p12
+*.pfx
+*.secret
+credentials.json
+*.credentials
+auth.json
+
+# IDE 的临时配置
+*.sublime-project
+*.sublime-workspace
+.vscode/*
+!.vscode/extensions.json
+.idea/*
+!.idea/runConfigurations
+
+# 安全：备份文件
+*.bak
+*.backup
+*.old
+
+# 用户本地配置（可能包含敏感信息）
+*.local.json
+*.local.yaml
+*.local.yml
+
+# 模型缓存
+modelscope_cache/
+huggingface_cache/
