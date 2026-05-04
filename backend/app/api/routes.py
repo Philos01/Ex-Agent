@@ -840,6 +840,13 @@ class FeedbackRequest(BaseModel):
     comment: Optional[str] = None
 
 
+class HumanFeedbackRequest(BaseModel):
+    session_id: str
+    feedback_type: str
+    content: str
+    iteration: int = 0
+
+
 @router.get("/documents/{filename}")
 def get_document_info(filename: str):
     """获取单个文档信息"""
@@ -895,6 +902,35 @@ def submit_feedback(req: FeedbackRequest):
     """提交用户反馈"""
     logger.info("Received feedback for message %s: rating=%d, comment=%s", req.message_id, req.rating, req.comment)
     return {"success": True, "message_id": req.message_id}
+
+
+@router.post("/human-feedback")
+def submit_human_feedback(req: HumanFeedbackRequest):
+    from app.services.human_feedback_service import get_feedback_service
+    service = get_feedback_service()
+    result = service.submit_feedback(
+        session_id=req.session_id,
+        feedback_type=req.feedback_type,
+        content=req.content,
+        iteration=req.iteration,
+    )
+    return {"status": "ok", "feedback_id": result["id"], "feedback": result}
+
+
+@router.get("/human-feedback/{session_id}")
+def get_human_feedback_history(session_id: str):
+    from app.services.human_feedback_service import get_feedback_service
+    service = get_feedback_service()
+    history = service.get_feedback_history(session_id)
+    return {"status": "ok", "session_id": session_id, "feedback": history, "total": len(history)}
+
+
+@router.get("/human-feedback-statistics")
+def get_human_feedback_statistics():
+    from app.services.human_feedback_service import get_feedback_service
+    service = get_feedback_service()
+    stats = service.get_statistics()
+    return {"status": "ok", "statistics": stats}
 
 
 # ── Graph visualization ──────────────────────────────────

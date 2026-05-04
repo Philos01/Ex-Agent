@@ -77,6 +77,7 @@ class MessageCreate(BaseModel):
     role: str
     content: str
     sources: Optional[List[dict]] = None
+    react_steps: Optional[List[dict]] = None
 
 
 class SessionResponse(BaseModel):
@@ -97,6 +98,7 @@ class MessageResponse(BaseModel):
     role: str
     content: str
     sources: Optional[List[dict]]
+    react_steps: Optional[List[dict]]
     created_at: str
 
     class Config:
@@ -215,6 +217,7 @@ def get_session(
                 role=m.role,
                 content=m.content,
                 sources=m.sources,
+                react_steps=m.react_steps,
                 created_at=safe_isoformat(m.created_at)
             ) for m in messages
         ]
@@ -296,7 +299,8 @@ def add_message(
         user_id=current_user.id,
         role=message_data.role,
         content=message_data.content,
-        sources=message_data.sources
+        sources=message_data.sources,
+        react_steps=message_data.react_steps
     )
     
     db.add(new_message)
@@ -321,6 +325,7 @@ def add_message(
         role=new_message.role,
         content=new_message.content,
         sources=new_message.sources,
+        react_steps=new_message.react_steps,
         created_at=safe_isoformat(new_message.created_at)
     )
 

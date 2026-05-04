@@ -79,11 +79,13 @@ def stream_answer_react(
             yield {"type": "react_error", "message": error_msg}
         elif event_type == "thinking":
             iteration = event_dict.get("iteration", 1)
-            total = event_dict.get("total", 5)
+            total = event_dict.get("total", -1)
+            progress_msg = f"思考中 (第{iteration}步)" if total == -1 else f"思考中 (第{iteration}/{total}步)"
+            progress = min(int(iteration / max(total, 1) * 75), 90) if total > 0 else min(iteration * 10, 90)
             yield {
                 "type": "state", "phase": "generating",
-                "message": f"思考中 (第{iteration}/{total}步)",
-                "progress": int(iteration / total * 75),
+                "message": progress_msg,
+                "progress": progress,
             }
         elif event_type == "token_usage":
             pass

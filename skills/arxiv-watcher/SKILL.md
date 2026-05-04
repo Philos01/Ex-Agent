@@ -14,8 +14,7 @@ input_parameters:
   max_results:
     type: integer
     required: false
-    default: 5
-    description: Maximum number of papers to return
+    description: Maximum number of papers to return (agent decides based on user request)
 ---
 
 # ArXiv Watcher

@@ -103,10 +103,6 @@ class Actor:
             if param_name in validated and "type" in param_schema:
                 validated[param_name] = self._coerce_type(validated[param_name], param_schema["type"])
 
-            if param_name in validated and "max" in param_schema:
-                if isinstance(validated[param_name], (int, float)):
-                    validated[param_name] = min(validated[param_name], param_schema["max"])
-
             if param_name in validated and "min" in param_schema:
                 if isinstance(validated[param_name], (int, float)):
                     validated[param_name] = max(validated[param_name], param_schema["min"])

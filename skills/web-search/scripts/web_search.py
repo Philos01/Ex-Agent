@@ -307,8 +307,33 @@ def main():
     parser.add_argument("--history", action="store_true", help="Show search history")
     parser.add_argument("--rerun", metavar="QUERY", help="Re-run a past search")
     parser.add_argument("--clear-history", action="store_true", help="Clear all search history")
+    parser.add_argument("--params", help="JSON parameters file (for skill system call)")
 
     args = parser.parse_args()
+
+    # 处理 --params 参数（技能系统调用方式）
+    is_skill_call = args.params is not None
+    
+    if args.params:
+        try:
+            with open(args.params, 'r', encoding='utf-8') as f:
+                params = json.load(f)
+            # 从 params 中提取参数
+            query = params.get("query") or params.get("question")
+            engine = params.get("engine", "auto")
+            num = params.get("num", 10)
+            safe = params.get("safe", False)
+            json_output = True  # 技能调用总是输出 JSON
+        except Exception as e:
+            print(f"错误: 无法读取参数文件: {e}", file=sys.stderr)
+            sys.exit(1)
+    else:
+        # 常规命令行调用方式
+        query = args.query
+        engine = args.engine
+        num = args.num
+        safe = args.safe
+        json_output = args.json
 
     if args.clear_history:
         clear_history()
@@ -321,23 +346,28 @@ def main():
     if args.rerun:
         query = args.rerun
         engine = args.engine
-    elif args.query:
-        query = args.query
-        engine = args.engine
-    else:
+
+    if not query:
         parser.print_help()
         return
 
     try:
         start_time = time.time()
-        results = search(query, engine=engine, num=args.num, safe=args.safe)
+        results = search(query, engine=engine, num=num, safe=safe)
         elapsed = time.time() - start_time
 
         add_to_history(query, len(results), engine)
 
-        print(format_results(results, args.json))
-
-        if not args.json:
+        if json_output or is_skill_call:
+            # 技能调用时，输出结构化的 JSON 结果
+            result = {
+                "success": True,
+                "data": results
+            }
+            # 使用 ensure_ascii=True 来避免编码问题，在接收端解码
+            print(json.dumps(result, ensure_ascii=True))
+        else:
+            print(format_results(results, False))
             print(f"\n✅ 共找到 {len(results)} 条结果 | 搜索耗时: {elapsed:.2f}秒")
             print("\n您可以输入以下命令：")
             print("- '查看搜索历史' - 查看最近的搜索记录")
@@ -345,7 +375,14 @@ def main():
             print("- '清除搜索历史' - 清除所有历史记录")
 
     except Exception as e:
-        handle_search_error(e)
+        if is_skill_call or json_output:
+            error_result = {
+                "success": False,
+                "error": str(e)
+            }
+            print(json.dumps(error_result, ensure_ascii=True))
+        else:
+            handle_search_error(e)
         sys.exit(1)
 
 

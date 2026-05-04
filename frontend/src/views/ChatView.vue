@@ -79,6 +79,7 @@
                 v-if="m.reactSteps && m.reactSteps.length > 0"
                 :steps="m.reactSteps"
                 :is-running="index === messages.length - 1 && isReActRunning && params.use_react"
+                :session-id="store.currentSessionId || ''"
                 class="mb-4 md:mb-6"
               />
               
@@ -196,6 +197,14 @@
             @update:use-graph="handleGraphUpdate"
             @show-react-prompt="handleReActPromptFromModeSelector"
           />
+          <button 
+            v-if="isReActRunning"
+            @click="handleTerminateAgent"
+            class="h-9 px-3 bg-error text-on-error rounded-xl flex items-center gap-1.5 shadow-md transition-all active:scale-90 hover:bg-error/90 text-sm font-bold"
+          >
+            <span class="material-symbols-outlined text-sm">stop_circle</span>
+            终止
+          </button>
           <textarea 
             v-model="q" 
             @keydown="handleKeyDown"
@@ -429,6 +438,7 @@ import ReActModePrompt from '../components/gen-ui/ReActModePrompt.vue'
 import ReActThinkingDisplay from '../components/gen-ui/ReActThinkingDisplay.vue'
 import DeepSeekThinkingPreview from '../components/gen-ui/DeepSeekThinkingPreview.vue'
 import ModeSelector from '../components/gen-ui/ModeSelector.vue'
+import HumanFeedbackInput from '../components/gen-ui/HumanFeedbackInput.vue'
 import { getComponent } from '../components/gen-ui/ComponentRegistry.js'
 import { marked } from 'marked'
 
@@ -475,6 +485,7 @@ const showReActPrompt = ref(false)
 const reactSteps = ref([])
 const isReActRunning = ref(false)
 const promptRef = ref(null)
+let currentAbortController = null
 
 // 引用源悬停预览状态
 const hoverSource = ref({
@@ -522,29 +533,52 @@ watch(() => store.chatMessages, (newMessages) => {
   isSyncingWithStore.value = true
   console.log('[DEBUG] store.chatMessages changed:', newMessages.length, 'messages')
   
-  // 保存本地的 thinkingState（按消息ID）
+  // 保存本地的 thinkingState和reactSteps（按消息ID）
   const localThinkingStates = {}
+  const localReactSteps = {}
   messages.value.forEach(msg => {
     if (msg.thinkingState) {
       localThinkingStates[msg.id] = msg.thinkingState
     }
-  })
-  
-  // 完全替换为新的消息列表，但保留匹配的 thinkingState
-  messages.value = newMessages.map(storeMsg => {
-    if (localThinkingStates[storeMsg.id]) {
-      return { ...storeMsg, thinkingState: localThinkingStates[storeMsg.id] }
+    if (msg.reactSteps) {
+      localReactSteps[msg.id] = msg.reactSteps
     }
-    return storeMsg
   })
   
-  // 当切换会话时，重置全局 ReAct 状态！防止之前会话的状态残留！
-  reactSteps.value = []
-  isReActRunning.value = false
+  // 完全替换为新的消息列表，但保留匹配的状态
+  messages.value = newMessages.map(storeMsg => {
+    const localMsg = { ...storeMsg }
+    if (localThinkingStates[storeMsg.id]) {
+      localMsg.thinkingState = localThinkingStates[storeMsg.id]
+    }
+    if (localReactSteps[storeMsg.id]) {
+      localMsg.reactSteps = localReactSteps[storeMsg.id]
+    }
+    return localMsg
+  })
+  
+  // 检查是否是真正的会话切换：检查第一个消息ID是否不同
+  const oldFirstId = store.chatMessages[0]?.id
+  const newFirstId = newMessages[0]?.id
+  const isSessionSwitch = oldFirstId !== newFirstId
+  
+  // 只有真正的会话切换时才重置全局ReAct状态
+  if (isSessionSwitch) {
+    console.log('[DEBUG] Session switch detected, resetting ReAct state')
+    reactSteps.value = []
+    isReActRunning.value = false
+  }
   
   // 如果是空数组，说明是新建会话或切换到了空会话，重置UI
   if (newMessages.length === 0) {
     resetUI()
+  }
+  
+  // 如果最后一条消息有reactSteps，恢复到全局reactSteps
+  const lastMsg = messages.value[messages.value.length - 1]
+  if (lastMsg && lastMsg.reactSteps && lastMsg.reactSteps.length > 0) {
+    reactSteps.value = [...lastMsg.reactSteps]
+    console.log('[DEBUG] Restored global reactSteps from last message:', reactSteps.value.length)
   }
   
   nextTick(() => {
@@ -552,25 +586,33 @@ watch(() => store.chatMessages, (newMessages) => {
   })
 }, { deep: true })
 
-// 监听messages变化，同步thinkingState到store
+// 监听messages变化，同步thinkingState和reactSteps到store
 watch(messages, (newMessages) => {
   if (isSyncingWithStore.value) return
   isSyncingWithStore.value = true
   
-  // 只在本地消息和store消息数量/顺序一致时，尝试同步 thinkingState
+  // 只在本地消息和store消息数量/顺序一致时，尝试同步
   // 避免在添加新消息时覆盖 store
   if (newMessages.length === store.chatMessages.length) {
-    // 检查是否有变化的 thinkingState，且消息ID匹配
-    let hasThinkingStateChange = false
+    // 检查是否有变化的 thinkingState 或 reactSteps，且消息ID匹配
+    let hasChange = false
     const updatedMessages = store.chatMessages.map((storeMsg) => {
       const localMsg = newMessages.find(m => m.id === storeMsg.id)
+      let updatedMsg = { ...storeMsg }
+      
       if (localMsg && localMsg.thinkingState && localMsg.thinkingState !== storeMsg.thinkingState) {
-        hasThinkingStateChange = true
-        return { ...storeMsg, thinkingState: localMsg.thinkingState }
+        hasChange = true
+        updatedMsg.thinkingState = localMsg.thinkingState
       }
-      return storeMsg
+      
+      if (localMsg && localMsg.reactSteps !== storeMsg.reactSteps) {
+        hasChange = true
+        updatedMsg.reactSteps = localMsg.reactSteps
+      }
+      
+      return updatedMsg
     })
-    if (hasThinkingStateChange) {
+    if (hasChange) {
       store.updateChatMessages(updatedMessages)
     }
   }
@@ -601,20 +643,24 @@ watch(() => route.path, (newPath) => {
   }
 })
 
-// 处理窗口可见性变化，确保 thinkingState 和 reasoningText 在切换窗口后不丢失
+// 处理窗口可见性变化，确保 thinkingState, reasoningText 和 reactSteps 在切换窗口后不丢失
 const handleVisibilityChange = () => {
   // 如果正在流式传输/加载中，不要强制同步，避免覆盖正在生成的内容！
   if (document.visibilityState === 'visible' && !loading.value && !streaming.value && !isReActRunning.value) {
-    console.log('[DEBUG] Window became visible, syncing messages with thinkingState and reasoningText')
-    // 窗口重新可见时，同步消息并保留 thinkingState 和 reasoningText
+    console.log('[DEBUG] Window became visible, syncing messages with thinkingState, reasoningText and reactSteps')
+    // 窗口重新可见时，同步消息并保留 thinkingState, reasoningText 和 reactSteps
     const localThinkingStates = {}
     const localReasoningTexts = {}
+    const localReactSteps = {}
     messages.value.forEach(msg => {
       if (msg.thinkingState) {
         localThinkingStates[msg.id] = msg.thinkingState
       }
       if (msg.reasoningText) {
         localReasoningTexts[msg.id] = msg.reasoningText
+      }
+      if (msg.reactSteps) {
+        localReactSteps[msg.id] = msg.reactSteps
       }
     })
     messages.value = [...store.chatMessages].map(msg => {
@@ -623,6 +669,9 @@ const handleVisibilityChange = () => {
       }
       if (localReasoningTexts[msg.id]) {
         msg.reasoningText = localReasoningTexts[msg.id]
+      }
+      if (localReactSteps[msg.id]) {
+        msg.reactSteps = localReactSteps[msg.id]
       }
       return msg
     })
@@ -721,6 +770,38 @@ const handleReActUpdate = (value) => {
 const handleGraphUpdate = (value) => {
   params.value.use_graph = value
   updateParams()
+}
+
+const handleTerminateAgent = async () => {
+  console.log('[DEBUG] Terminating agent execution')
+  
+  // 1. 发送终止反馈
+  const sessionId = store.currentSessionId || 'default'
+  try {
+    await fetch('/api/human-feedback', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        feedback_type: 'execution_termination',
+        content: '用户终止执行'
+      })
+    })
+  } catch (e) {
+    console.error('[DEBUG] Failed to send termination feedback:', e)
+  }
+  
+  // 2. 立即取消fetch请求
+  if (currentAbortController) {
+    currentAbortController.abort()
+    console.log('[DEBUG] Fetch request aborted')
+    currentAbortController = null
+  }
+  
+  // 3. 立即重置前端状态
+  isReActRunning.value = false
+  loading.value = false
+  streaming.value = false
 }
 
 const handleSampleQuestion = (question) => {
@@ -971,6 +1052,10 @@ const sendStream = async () => {
       history_count: historyMessages.length
     })
     
+    // 创建 abort controller
+    currentAbortController = new AbortController()
+    const signal = currentAbortController.signal
+    
     // Use fetch instead of axios for streaming responses
     const response = await fetch('/api/qa', {
       method: 'POST',
@@ -988,7 +1073,8 @@ const sendStream = async () => {
         use_react: params.value.use_react,
         use_graph: params.value.use_graph,
         messages: historyMessages
-      })
+      }),
+      signal: signal
     })
     
     if (!response.ok) throw new Error('API Error')
@@ -1149,28 +1235,38 @@ const sendStream = async () => {
       const lastIndex = messages.value.length - 1
       // 确保 assistant 消息包含完整的元数据
       messages.value[lastIndex].had_tool_calls = !!(messages.value[lastIndex].reactSteps && messages.value[lastIndex].reactSteps.length > 0)
+      // 同步保存reactSteps到消息对象
+      if (reactSteps.value.length > 0) {
+        messages.value[lastIndex].reactSteps = [...reactSteps.value]
+      }
 
-      const savedAssistantMessage = await saveMessageToDatabase('assistant', fullText, sources)
+      const savedAssistantMessage = await saveMessageToDatabase('assistant', fullText, sources, reactSteps.value.length > 0 ? reactSteps.value : null)
       if (savedAssistantMessage) {
         messages.value[lastIndex].id = savedAssistantMessage.id
       }
     }
     
   } catch (error) {
-    console.error('Error:', error)
-    const lastIndex = messages.value.length - 1
-    messages.value[lastIndex].text = '抱歉，发生了错误。请检查网络连接或稍后重试。'
+    if (error.name === 'AbortError') {
+      console.log('[DEBUG] Fetch aborted by user')
+      // 已经在handleTerminateAgent里重置了状态，不需要额外处理
+    } else {
+      console.error('Error:', error)
+      const lastIndex = messages.value.length - 1
+      messages.value[lastIndex].text = '抱歉，发生了错误。请检查网络连接或稍后重试。'
+    }
   } finally {
     console.log('[DEBUG] Finally block executed, resetting all states')
     loading.value = false
     streaming.value = false
     isReActRunning.value = false
+    currentAbortController = null
     store.updateChatMessages(messages.value)
   }
 }
 
 // 保存消息到数据库的辅助函数
-async function saveMessageToDatabase(role, content, sources) {
+async function saveMessageToDatabase(role, content, sources, reactSteps = null) {
   if (!store.currentSessionId) {
     console.warn('[WARN] No session ID available, cannot save message')
     return null
@@ -1185,7 +1281,7 @@ async function saveMessageToDatabase(role, content, sources) {
   try {
     savingMessage.value = true
     console.log('[DEBUG] Saving message to database:', { role, content: content.substring(0, 50) + '...' })
-    const savedMessage = await sessionService.addMessage(store.currentSessionId, role, content, sources)
+    const savedMessage = await sessionService.addMessage(store.currentSessionId, role, content, sources, reactSteps)
     // 只刷新会话列表（更新预览信息），不重新加载消息（避免丢失正在流式传输的助手消息）
     await store.refreshSessionList()
     console.log('[DEBUG] Message saved to database:', savedMessage)

@@ -30,6 +30,12 @@ const routes = [
     name: 'Settings',
     component: () => import('@/views/SettingsView.vue'),
     meta: { requiresAuth: true }
+  },
+  {
+    path: '/feedback-history',
+    name: 'FeedbackHistory',
+    component: () => import('@/views/FeedbackHistoryView.vue'),
+    meta: { requiresAuth: true }
   }
 ]
 

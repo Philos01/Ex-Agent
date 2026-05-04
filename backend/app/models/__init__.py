@@ -11,6 +11,7 @@ from app.models.permission import Permission
 from app.models.role_permission import RolePermission
 from app.models.audit_log import AuditLog
 from app.models.parent_document import ParentDocumentModel
+from app.models.human_feedback import HumanFeedback
 
 __all__ = [
     'Base',
@@ -23,4 +24,5 @@ __all__ = [
     'RolePermission',
     'AuditLog',
     'ParentDocumentModel',
+    'HumanFeedback',
 ]

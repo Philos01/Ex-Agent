@@ -100,7 +100,7 @@
             :class="[
               'w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all',
               localUseGraph
-                ? 'bg-secondary/10 text-secondary hover:bg-secondary/15'
+                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                 : 'hover:bg-surface-container-high text-on-surface'
             ]"
           >
@@ -109,11 +109,11 @@
             </span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold">{{ localUseGraph ? '图结构检索已启用' : '图结构检索' }}</p>
-              <p class="text-xs mt-0.5" :class="localUseGraph ? 'text-secondary/70' : 'text-on-surface-variant'">
-                {{ localUseGraph ? '自动发现文档间实体关联和关系网络' : '启用后可跨文档追溯实体关系（如"用了X数据集有哪些论文"）' }}
+              <p class="text-xs mt-0.5" :class="localUseGraph ? 'text-emerald-600' : 'text-on-surface-variant'">
+                {{ localUseGraph ? '自动发现文档间实体关联和关系网络' : '启用后可跨文档追溯实体关系' }}
               </p>
             </div>
-            <span v-if="localUseGraph" class="material-symbols-outlined text-secondary">check_circle</span>
+            <span v-if="localUseGraph" class="material-symbols-outlined text-emerald-600">check_circle</span>
           </button>
 
           <!-- ReAct 模式选项 -->
@@ -122,7 +122,7 @@
             :class="[
               'w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left transition-all',
               localUseReAct
-                ? 'bg-tertiary/10 text-tertiary hover:bg-tertiary/15'
+                ? 'bg-emerald-100 text-emerald-700 hover:bg-emerald-200'
                 : 'hover:bg-surface-container-high text-on-surface'
             ]"
           >
@@ -131,11 +131,11 @@
             </span>
             <div class="flex-1 min-w-0">
               <p class="text-sm font-semibold">{{ localUseReAct ? 'ReAct 多步推理已启用' : 'ReAct 多步推理' }}</p>
-              <p class="text-xs mt-0.5" :class="localUseReAct ? 'text-tertiary/70' : 'text-on-surface-variant'">
+              <p class="text-xs mt-0.5" :class="localUseReAct ? 'text-emerald-600' : 'text-on-surface-variant'">
                 {{ localUseReAct ? '模型将使用工具进行多步推理和验证' : '启用后可调用工具进行复杂任务分解' }}
               </p>
             </div>
-            <span v-if="localUseReAct" class="material-symbols-outlined text-tertiary">check_circle</span>
+            <span v-if="localUseReAct" class="material-symbols-outlined text-emerald-600">check_circle</span>
           </button>
         </div>
 

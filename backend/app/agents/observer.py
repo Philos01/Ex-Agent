@@ -18,7 +18,7 @@ class Observer:
 
     COMPRESSION_CONFIG: Dict[str, dict] = {
         "arxiv_search": {
-            "max_papers_in_scratchpad": 5,  # 改为默认 5 篇
+            "max_papers_in_scratchpad": None,  # 不限制数量
             "abstract_max_chars": 150,
         },
         "weather": {
@@ -126,7 +126,7 @@ class Observer:
             if paper_count == 0 and not paper_text.strip().startswith("### Paper"):
                 header = paper_text.strip()
                 continue
-            if paper_count >= max_papers:
+            if max_papers is not None and paper_count >= max_papers:
                 break
 
             title_match = re.search(r"### Paper \d+: (.+)", paper_text)
@@ -161,7 +161,7 @@ class Observer:
         result += "\n\n".join(compressed_parts)
 
         total_count = len(re.findall(r"### Paper \d+:", text))
-        if total_count > max_papers:
+        if max_papers is not None and total_count > max_papers:
             result += f"\n\n*...（共 {total_count} 篇，展示前 {max_papers} 篇）*"
         return result
 

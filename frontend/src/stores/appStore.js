@@ -103,7 +103,7 @@ export const useAppStore = defineStore('app', () => {
           sources: m.sources,
           thinkingState: null,
           reasoningText: null,
-          reactSteps: null,
+          reactSteps: m.react_steps,
           components: null
         }
       })
@@ -156,7 +156,8 @@ export const useAppStore = defineStore('app', () => {
             currentSessionId.value,
             message.role,
             message.text,
-            message.sources
+            message.sources,
+            message.reactSteps
           )
         }
       }

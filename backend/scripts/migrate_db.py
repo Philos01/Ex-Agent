@@ -5,11 +5,19 @@ Database migration script to add new fields to existing tables
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
+# Add backend directory to path
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.core.config import engine, SessionLocal
 from app.models.base import Base
 from sqlalchemy import text
+
+def column_exists(db, table_name, column_name):
+    """Check if a column exists in a table using SQLite PRAGMA"""
+    result = db.execute(text(f"PRAGMA table_info({table_name})")).fetchall()
+    columns = [col[1] for col in result]
+    return column_name in columns
+
 
 def migrate_database():
     """
@@ -23,15 +31,7 @@ def migrate_database():
     
     try:
         # Check if last_message_preview column exists
-        check_column_query = """
-        SELECT column_name 
-        FROM information_schema.columns 
-        WHERE table_name = 'sessions' 
-        AND column_name = 'last_message_preview'
-        """
-        result = db.execute(text(check_column_query)).fetchone()
-        
-        if not result:
+        if not column_exists(db, 'sessions', 'last_message_preview'):
             print("\nAdding 'last_message_preview' column to sessions table...")
             add_preview_query = """
             ALTER TABLE sessions 
@@ -47,8 +47,16 @@ def migrate_database():
             """
             db.execute(text(add_count_query))
             print("[OK] 'message_count' column added")
-        else:
-            print("\n[OK] Columns already exist, skipping migration")
+        
+        # Check if react_steps column exists in messages table
+        if not column_exists(db, 'messages', 'react_steps'):
+            print("\nAdding 'react_steps' column to messages table...")
+            add_react_steps_query = """
+            ALTER TABLE messages 
+            ADD COLUMN react_steps TEXT
+            """
+            db.execute(text(add_react_steps_query))
+            print("[OK] 'react_steps' column added")
         
         db.commit()
         
