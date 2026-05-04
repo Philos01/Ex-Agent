@@ -169,8 +169,7 @@ _DEFAULT_CONFIG: Dict = {
             "version": "1.0.0"
         },
         "arxiv_search": {
-            "enabled": True,
-            "max_results": 5
+            "enabled": True
         }
     }
 }

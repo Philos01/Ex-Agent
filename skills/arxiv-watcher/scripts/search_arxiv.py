@@ -104,7 +104,7 @@ def main():
             with open(args.params, 'r', encoding='utf-8') as f:
                 params = json.load(f)
             query = params.get("query", "all")
-            count = params.get("count", default_count)
+            count = params.get("count") or params.get("max_results") or default_count
         except Exception as e:
             print(f"错误: 无法读取参数文件: {e}", file=sys.stderr)
             sys.exit(1)

@@ -182,6 +182,8 @@ import JsonDisplay from './JsonDisplay.vue'
 const props = defineProps({
   steps: { type: Array, default: () => [] },
   isRunning: { type: Boolean, default: false },
+  sessionId: { type: String, default: '' },
+  availableTools: { type: Array, default: () => [] },
 })
 
 const collapsed = ref(false)

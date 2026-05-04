@@ -17,6 +17,7 @@ class Message(BaseModel):
     role = Column(String(20), nullable=False, index=True, comment="角色: user/assistant/system")
     content = Column(Text, nullable=False, comment="消息内容")
     sources = Column(JSON, nullable=True, comment="引用来源(JSON格式，支持列表或字典)")
+    react_steps = Column(JSON, nullable=True, comment="ReAct执行步骤(JSON格式)")
     
     # Relationships
     session = relationship("Session", back_populates="messages")

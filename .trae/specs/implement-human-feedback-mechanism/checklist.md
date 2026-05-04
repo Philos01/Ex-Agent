@@ -1,0 +1,38 @@
+- [x] HumanFeedback 数据模型定义完整，包含所有必需字段（id, session_id, iteration, feedback_type, content, tool_name, tool_parameters, is_applied, created_at）
+- [x] HumanFeedback 模型在 __init__.py 中正确注册
+- [x] 数据库迁移脚本可成功执行，human_feedback 表创建成功（由HumanFeedbackService._init_db自动创建）
+- [x] FeedbackType 枚举包含5种类型：tool_call_suggestion, parameter_adjustment, execution_termination, strategy_modification, general_comment
+- [x] FeedbackRequest 和 FeedbackResponse 数据类定义完整
+- [x] FeedbackState 枚举包含 pending, accepted, rejected 三种状态
+- [x] EventType 新增 FEEDBACK_REQUEST 和 FEEDBACK_ACCEPTED
+- [x] HumanFeedbackService 实现反馈存储（SQLite + 内存队列）
+- [x] HumanFeedbackService 实现按会话的反馈队列管理（入队、出队、标记已应用）
+- [x] HumanFeedbackService 实现反馈查询和统计
+- [x] AgentLoop max_iterations 默认值改为0（无限制）
+- [x] AgentLoop 当 max_iterations=0 时使用 while True 循环
+- [x] AgentLoop 在思考后、行动前有反馈检查点
+- [x] AgentLoop 正确处理 tool_call_suggestion 反馈（覆盖工具调用决策）
+- [x] AgentLoop 正确处理 parameter_adjustment 反馈（修改工具参数）
+- [x] AgentLoop 正确处理 execution_termination 反馈（立即终止）
+- [x] AgentLoop 正确处理 strategy_modification 反馈（调整策略）
+- [x] AgentLoop 在检查点发出 feedback_request 事件
+- [x] AgentLoop 在反馈处理后发出 feedback_accepted 事件
+- [x] react_stream.py 正确透传 feedback_request 事件
+- [x] react_stream.py 正确透传 feedback_accepted 事件
+- [x] POST /api/human-feedback 端点可成功提交反馈并返回反馈ID
+- [x] GET /api/human-feedback/{session_id} 端点可返回会话反馈历史
+- [x] GET /api/human-feedback-statistics 端点可返回反馈统计
+- [x] HumanFeedbackInput 组件支持5种反馈类型选择
+- [x] HumanFeedbackInput 组件支持工具调用建议的专用输入
+- [x] HumanFeedbackInput 组件支持参数调整的专用输入
+- [x] HumanFeedbackInput 组件支持一键终止
+- [x] HumanFeedbackInput 组件可成功提交反馈到后端
+- [x] ReActThinkingDisplay action步骤旁有反馈按钮
+- [x] 点击反馈按钮可展开HumanFeedbackInput面板
+- [x] 反馈面板预填当前步骤的工具名和参数
+- [x] ChatView 正确处理 feedback_request SSE事件
+- [x] ChatView 正确处理 feedback_accepted SSE事件
+- [x] ChatView 在ReAct运行时显示全局终止按钮
+- [x] FeedbackHistory 组件可展示反馈历史列表
+- [x] FeedbackHistoryView 页面可正常访问
+- [x] /feedback-history 路由已添加到路由配置

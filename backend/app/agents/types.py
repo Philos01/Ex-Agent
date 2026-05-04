@@ -16,6 +16,17 @@ class StepType(str, Enum):
     FINAL_ANSWER = "final_answer"
 
 
+class FeedbackType(str, Enum):
+    EXECUTION_TERMINATION = "execution_termination"
+    CONTINUE_EXECUTION = "continue_execution"
+
+
+class FeedbackState(str, Enum):
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+
+
 class EventType(str, Enum):
     THINKING = "thinking"
     THOUGHT_CHUNK = "thought_chunk"
@@ -70,6 +81,22 @@ class ReflectionResult:
     confidence: float = 0.5
     reason: str = ""
     suggestion: Optional[str] = None
+
+
+@dataclass
+class FeedbackRequest:
+    feedback_type: FeedbackType = FeedbackType.CONTINUE_EXECUTION
+    content: str = ""
+    session_id: Optional[str] = None
+    iteration: int = 0
+
+
+@dataclass
+class FeedbackResponse:
+    feedback_id: str = ""
+    state: FeedbackState = FeedbackState.PENDING
+    message: str = ""
+    applied_changes: Optional[Dict[str, Any]] = None
 
 
 @dataclass

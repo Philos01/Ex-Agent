@@ -23,14 +23,18 @@ export const sessionService = {
     return response.data
   },
 
-  async addMessage(sessionId, role, content, sources = null) {
+  async addMessage(sessionId, role, content, sources = null, reactSteps = null) {
     // 确保sources是对象或null，避免发送undefined
     const sourcesData = sources || null
-    const response = await api.post(`/sessions/${sessionId}/messages`, {
+    const data = {
       role,
       content,
       sources: sourcesData
-    })
+    }
+    if (reactSteps) {
+      data.react_steps = reactSteps
+    }
+    const response = await api.post(`/sessions/${sessionId}/messages`, data)
     return response.data
   },
 

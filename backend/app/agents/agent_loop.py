@@ -11,6 +11,7 @@ from app.core.config import get_complete_config
 from app.agents.types import (
     AgentStep, AgentState, AgentEvent, EventType,
     ParsedOutput, ReflectionResult,
+    FeedbackType, FeedbackRequest, FeedbackResponse, FeedbackState,
 )
 from app.agents.thinker import Thinker, ThinkConfig
 from app.agents.actor import Actor
@@ -41,16 +42,18 @@ class AgentLoop:
 
     def __init__(
         self,
-        max_iterations: int = 5,
+        max_iterations: int = 0,
         provider: str = "openai",
         use_few_shot: bool = True,
         use_llm_reflection: bool = False,
         max_tokens: int = 4096,
         enable_thinking: bool = False,
+        session_id: str = "",
     ):
         self.cfg = get_complete_config()
         self.max_iterations = max_iterations
         self.provider = provider
+        self.session_id = session_id
 
         # Core modules
         think_config = ThinkConfig(max_tokens=max_tokens, enable_thinking=enable_thinking)
@@ -71,7 +74,7 @@ class AgentLoop:
         self.prompt_engine = PromptEngine(tools=self.tools, use_few_shot=use_few_shot)
 
         logger.info(
-            f"[AgentLoop] Initialized: max_iter={max_iterations}, "
+            f"[AgentLoop] Initialized: max_iter={max_iterations if max_iterations > 0 else 'unlimited'}, "
             f"provider={provider}, tools={len(self.tools)}"
         )
 
@@ -133,11 +136,15 @@ class AgentLoop:
         state = AgentState(max_iterations=self.max_iterations)
 
         try:
-            for iteration in range(self.max_iterations):
+            iteration = 0
+            while True:
+                if self.max_iterations > 0 and iteration >= self.max_iterations:
+                    break
+                iteration += 1
                 yield AgentEvent(
                     type=EventType.THINKING,
-                    iteration=iteration + 1,
-                    total_iterations=self.max_iterations,
+                    iteration=iteration,
+                    total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                 )
 
                 # ── Build prompt with caching ──
@@ -155,8 +162,8 @@ class AgentLoop:
 
                 yield AgentEvent(
                     type=EventType.TOKEN_USAGE,
-                    iteration=iteration + 1,
-                    total_iterations=self.max_iterations,
+                    iteration=iteration,
+                    total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                     metadata={
                         "estimated_tokens": prompt_tokens,
                         "budget_remaining": self.token_budget.max_tokens - prompt_tokens,
@@ -173,15 +180,15 @@ class AgentLoop:
                             yield AgentEvent(
                                 type=EventType.THOUGHT_CHUNK,
                                 content=chunk_event.get("content"),
-                                iteration=iteration + 1,
-                                total_iterations=self.max_iterations,
+                                iteration=iteration,
+                                total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                             )
                         elif chunk_event.get("type") == "reasoning_chunk":
                             yield AgentEvent(
                                 type=EventType.REASONING_CHUNK,
                                 content=chunk_event.get("content"),
-                                iteration=iteration + 1,
-                                total_iterations=self.max_iterations,
+                                iteration=iteration,
+                                total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                             )
                         elif chunk_event.get("type") == "thought_complete":
                             parsed = chunk_event["parsed"]
@@ -194,8 +201,8 @@ class AgentLoop:
                 yield AgentEvent(
                     type=EventType.THOUGHT,
                     content=parsed.thought,
-                    iteration=iteration + 1,
-                    total_iterations=self.max_iterations,
+                    iteration=iteration,
+                    total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                 )
 
                 # ── REFLECT (pre-action) ──
@@ -204,7 +211,7 @@ class AgentLoop:
                     thought=parsed.thought,
                     action=parsed.action,
                     observation="",
-                    iteration=iteration,
+                    iteration=iteration - 1,
                     max_iterations=self.max_iterations,
                     steps=state.steps,
                 )
@@ -212,15 +219,15 @@ class AgentLoop:
                 # ── Check for final answer ──
                 if parsed.is_final_answer or (evaluation.should_stop and not parsed.action):
                     logger.info(
-                        f"[AgentLoop] Final answer at iteration {iteration + 1}. "
+                        f"[AgentLoop] Final answer at iteration {iteration}. "
                         f"Reason: {evaluation.reason}"
                     )
                     self.scratchpad.add_step(thought=parsed.thought)
                     yield AgentEvent(
                         type=EventType.FINAL_ANSWER,
                         content=parsed.final_answer,
-                        iteration=iteration + 1,
-                        total_iterations=self.max_iterations,
+                        iteration=iteration,
+                        total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                     )
                     yield AgentEvent(
                         type=EventType.DONE,
@@ -228,7 +235,7 @@ class AgentLoop:
                         metadata={
                             "steps": self.scratchpad.get_steps(),
                             "success": True,
-                            "iterations_used": iteration + 1,
+                            "iterations_used": iteration,
                         },
                     )
                     return
@@ -243,8 +250,8 @@ class AgentLoop:
                     yield AgentEvent(
                         type=EventType.FINAL_ANSWER,
                         content=fallback,
-                        iteration=iteration + 1,
-                        total_iterations=self.max_iterations,
+                        iteration=iteration,
+                        total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                     )
                     yield AgentEvent(
                         type=EventType.DONE,
@@ -260,8 +267,8 @@ class AgentLoop:
                 yield AgentEvent(
                     type=EventType.ACTION,
                     content={"name": action, "input": action_input},
-                    iteration=iteration + 1,
-                    total_iterations=self.max_iterations,
+                    iteration=iteration,
+                    total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                 )
 
                 try:
@@ -290,8 +297,8 @@ class AgentLoop:
                 yield AgentEvent(
                     type=EventType.OBSERVATION,
                     content=obs["compressed"],
-                    iteration=iteration + 1,
-                    total_iterations=self.max_iterations,
+                    iteration=iteration,
+                    total_iterations=self.max_iterations if self.max_iterations > 0 else -1,
                     metadata={
                         "raw_length": obs["raw_length"],
                         "compressed_length": obs["compressed_length"],
@@ -305,7 +312,7 @@ class AgentLoop:
                     thought=parsed.thought,
                     action=action,
                     observation=obs["compressed"],
-                    iteration=iteration,
+                    iteration=iteration - 1,
                     max_iterations=self.max_iterations,
                     steps=state.steps,
                     action_success=obs["success"],
@@ -333,20 +340,20 @@ class AgentLoop:
                 if post_eval.should_stop and not obs["success"]:
                     logger.info(f"[AgentLoop] Action failed and reflector suggests stop: {post_eval.reason}")
 
-            # Max iterations reached
-            yield AgentEvent(
-                type=EventType.ERROR,
-                content=f"达到最大迭代次数 ({self.max_iterations})",
-            )
-            yield AgentEvent(
-                type=EventType.DONE,
-                content="抱歉，经过多步思考仍未能得出满意答案。请尝试简化问题或提供更多细节。",
-                metadata={
-                    "steps": self.scratchpad.get_steps(),
-                    "success": False,
-                    "iterations_used": self.max_iterations,
-                },
-            )
+            if self.max_iterations > 0:
+                yield AgentEvent(
+                    type=EventType.ERROR,
+                    content=f"达到最大迭代次数 ({self.max_iterations})",
+                )
+                yield AgentEvent(
+                    type=EventType.DONE,
+                    content="抱歉，经过多步思考仍未能得出满意答案。请尝试简化问题或提供更多细节。",
+                    metadata={
+                        "steps": self.scratchpad.get_steps(),
+                        "success": False,
+                        "iterations_used": self.max_iterations,
+                    },
+                )
 
         except Exception as e:
             logger.error(f"[AgentLoop] Unexpected error: {e}", exc_info=True)
@@ -365,6 +372,17 @@ class AgentLoop:
         if stream:
             return self.thinker.think_stream(prompt)
         return self.thinker.think(prompt)
+
+    def _check_feedback(self, iteration: int) -> Optional[FeedbackRequest]:
+        """检查是否有终止反馈（非阻塞）。"""
+        return None
+
+    def _apply_feedback(self, feedback: FeedbackRequest, parsed: ParsedOutput) -> ParsedOutput:
+        if feedback.feedback_type == FeedbackType.EXECUTION_TERMINATION:
+            pass
+        elif feedback.feedback_type == FeedbackType.CONTINUE_EXECUTION:
+            pass
+        return parsed
 
     def _build_prompt(
         self,
